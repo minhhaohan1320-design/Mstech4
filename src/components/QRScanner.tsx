@@ -61,7 +61,6 @@ export const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onClose }) 
             onScan={(result) => handleScan(result[0].rawValue)} 
             onError={(err) => console.error(err)}
             components={{
-              audio: false,
               onOff: true,
               torch: true,
               zoom: false,
