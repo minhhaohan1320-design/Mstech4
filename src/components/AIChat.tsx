@@ -3,6 +3,7 @@ import { SensorData } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Send, Loader2 } from 'lucide-react';
+import { ai } from '../lib/gemini';
 
 interface AIChatProps {
   data: SensorData | null;
@@ -22,23 +23,37 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
     setIsTyping(true);
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userMessage: userMsg,
-          sensorData: data
-        })
+      const n = data?.n;
+      const p = data?.p;
+      const k = data?.k;
+      const moisture = data?.moisture;
+      const soilTemp = data?.soilTemp;
+      const ph = data?.ph;
+      const waterTemp = data?.waterTemp;
+
+      const dataContext = data ? `Dữ liệu cảm biến hiện tại:
+- N: ${n ?? 'Chưa có'} mg/kg
+- P: ${p ?? 'Chưa có'} mg/kg
+- K: ${k ?? 'Chưa có'} mg/kg
+- Độ ẩm: ${moisture ?? 'Chưa có'} %
+- Nhiệt độ đất: ${soilTemp ?? 'Chưa có'} °C
+- pH: ${ph ?? 'Chưa có'}
+- Nhiệt độ nước: ${waterTemp ?? 'Chưa có'} °C` : "Hiện tại chưa có dữ liệu cảm biến.";
+
+      const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh. Người dùng hỏi: "${userMsg}". 
+${dataContext}
+Tuyệt đối không tự bịa dữ liệu. Nếu thông số nào chưa có, hãy nói rõ là chưa có.
+Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: prompt
       });
       
-      const resData = await response.json();
-      if (response.ok) {
-        setMessages(prev => [...prev, { role: 'ai', text: resData.result }]);
-      } else {
-        setMessages(prev => [...prev, { role: 'ai', text: "Lỗi kết nối tới não bộ AI." }]);
-      }
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'ai', text: "Mất kết nối với trung tâm máy chủ." }]);
+      setMessages(prev => [...prev, { role: 'ai', text: response.text || "Không có phản hồi." }]);
+    } catch (err: any) {
+      console.error(err);
+      setMessages(prev => [...prev, { role: 'ai', text: "Lỗi kết nối tới não bộ AI: " + err.message }]);
     } finally {
       setIsTyping(false);
     }

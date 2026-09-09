@@ -32,8 +32,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Dòng này sẽ lấy API Key từ Bước 1 bạn đã cài để đưa vào web
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

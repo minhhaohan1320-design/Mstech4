@@ -3,6 +3,7 @@ import { SensorData, AIInsight } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Sparkles, Loader2, AlertTriangle, TrendingUp, CheckCircle } from 'lucide-react';
+import { ai, Type } from '../lib/gemini';
 
 interface AIAnalysisProps {
   data: SensorData | null;
@@ -17,28 +18,57 @@ export const AIAnalysis: React.FC<AIAnalysisProps> = ({ data, hideCard }) => {
   const handleAnalyze = async () => {
     if (!data) return;
     setIsAnalyzing(true);
-    try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cropType,
-          location: 'Bắc Giang',
-          n: data.n,
-          p: data.p,
-          k: data.k,
-          moisture: data.moisture,
-          soilTemp: data.soilTemp,
-          ph: data.ph,
-          waterTemp: data.waterTemp,
-        })
-      });
 
-      const resData = await response.json();
-      if (response.ok) {
+    try {
+      const prompt = `Bạn là một chuyên gia nông nghiệp thông minh. Dữ liệu cảm biến đo được từ trạm quan trắc nông nghiệp tại khu vực Bắc Giang như sau:
+- Giống cây: ${cropType || 'Chưa rõ'}
+- Nitơ (N): ${data.n ?? 'Chưa có'} mg/kg
+- Phốt pho (P): ${data.p ?? 'Chưa có'} mg/kg
+- Kali (K): ${data.k ?? 'Chưa có'} mg/kg
+- Độ ẩm đất: ${data.moisture ?? 'Chưa có'} %
+- Nhiệt độ đất: ${data.soilTemp ?? 'Chưa có'} °C
+- Độ pH: ${data.ph ?? 'Chưa có'}
+- Nhiệt độ nước: ${data.waterTemp ?? 'Chưa có'} °C
+
+Nếu thiếu dữ liệu nào (null/undefined), hãy ghi rõ là "Chưa có dữ liệu [tên thông số]".
+Tuyệt đối KHÔNG tự tạo dữ liệu bịa đặt.
+Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.7-flash",
+        contents: prompt,
+        config: {
+          systemInstruction: "Bạn là M.S.AI - Trợ lý phân tích nông nghiệp. Trả về đúng định dạng JSON được yêu cầu.",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              summary: { type: Type.STRING, description: "Đánh giá tổng quan về tình trạng." },
+              nutrients: {
+                type: Type.OBJECT,
+                properties: {
+                  n: { type: Type.STRING, description: "Nhận xét về Nitơ." },
+                  p: { type: Type.STRING, description: "Nhận xét về Phốt pho." },
+                  k: { type: Type.STRING, description: "Nhận xét về Kali." }
+                }
+              },
+              moisture: { type: Type.STRING, description: "Nhận xét về độ ẩm." },
+              ph: { type: Type.STRING, description: "Nhận xét về pH." },
+              temperature: { type: Type.STRING, description: "Nhận xét về nhiệt độ đất và nước." },
+              anomalies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các dấu hiệu bất thường nếu có." },
+              trends: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Xu hướng hiện tại." },
+              recommendations: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các hành động khuyến nghị." }
+            },
+            required: ["summary", "nutrients", "moisture", "ph", "temperature", "anomalies", "trends", "recommendations"]
+          }
+        }
+      });
+      
+      const resData = JSON.parse(response.text || '{}');
+      if (resData && resData.summary) {
         setAnalysis(resData);
       } else {
-        alert(resData.error || "Có lỗi xảy ra khi gọi AI.");
+        alert("Có lỗi xảy ra khi phân tích (Dữ liệu không đúng chuẩn).");
       }
     } catch (error) {
       console.error(error);
