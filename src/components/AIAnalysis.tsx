@@ -70,9 +70,13 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
       } else {
         alert("Có lỗi xảy ra khi phân tích (Dữ liệu không đúng chuẩn).");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Lỗi kết nối AI.");
+      if (error.message && error.message.includes("API key")) {
+         alert("Lỗi: Không tìm thấy Khóa API Gemini hợp lệ. Vui lòng kiểm tra lại cấu hình GitHub Secrets.");
+      } else {
+         alert("Lỗi kết nối AI: " + error.message);
+      }
     } finally {
       setIsAnalyzing(false);
     }

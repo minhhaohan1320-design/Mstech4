@@ -53,7 +53,11 @@ Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.
       setMessages(prev => [...prev, { role: 'ai', text: response.text || "Không có phản hồi." }]);
     } catch (err: any) {
       console.error(err);
-      setMessages(prev => [...prev, { role: 'ai', text: "Lỗi kết nối tới não bộ AI: " + err.message }]);
+      let errMsg = err.message;
+      if (errMsg && errMsg.includes("API key")) {
+        errMsg = "Không tìm thấy Khóa API Gemini hợp lệ trên GitHub. Bạn cần cấu hình GitHub Secrets.";
+      }
+      setMessages(prev => [...prev, { role: 'ai', text: "Lỗi kết nối tới não bộ AI: " + errMsg }]);
     } finally {
       setIsTyping(false);
     }
