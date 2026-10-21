@@ -3,7 +3,7 @@ import { SensorData } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Send, Loader2 } from 'lucide-react';
-import { ai } from '../lib/gemini';
+import { getGeminiClient } from '../lib/gemini';
 
 interface AIChatProps {
   data: SensorData | null;
@@ -23,15 +23,42 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
     setIsTyping(true);
 
     try {
-      const n = data?.n;
-      const p = data?.p;
-      const k = data?.k;
-      const moisture = data?.moisture;
-      const soilTemp = data?.soilTemp;
-      const ph = data?.ph;
-      const waterTemp = data?.waterTemp;
+      let aiResponseText = '';
 
-      const dataContext = data ? `Dữ liệu cảm biến hiện tại:
+      // 1. Ưu tiên gọi API backend (/api/chat)
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userMessage: userMsg,
+            sensorData: data,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json?.result) {
+            aiResponseText = json.result;
+          }
+        }
+      } catch (fetchErr) {
+        console.warn("Không thể gọi /api/chat từ server, thử fallback:", fetchErr);
+      }
+
+      // 2. Fallback sang client-side Gemini nếu có VITE_GEMINI_API_KEY
+      if (!aiResponseText) {
+        const client = getGeminiClient();
+        if (client) {
+          const n = data?.n;
+          const p = data?.p;
+          const k = data?.k;
+          const moisture = data?.moisture;
+          const soilTemp = data?.soilTemp;
+          const ph = data?.ph;
+          const waterTemp = data?.waterTemp;
+
+          const dataContext = data ? `Dữ liệu cảm biến hiện tại:
 - N: ${n ?? 'Chưa có'} mg/kg
 - P: ${p ?? 'Chưa có'} mg/kg
 - K: ${k ?? 'Chưa có'} mg/kg
@@ -40,22 +67,33 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
 - pH: ${ph ?? 'Chưa có'}
 - Nhiệt độ nước: ${waterTemp ?? 'Chưa có'} °C` : "Hiện tại chưa có dữ liệu cảm biến.";
 
-      const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh. Người dùng hỏi: "${userMsg}". 
+          const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh. Người dùng hỏi: "${userMsg}". 
 ${dataContext}
 Tuyệt đối không tự bịa dữ liệu. Nếu thông số nào chưa có, hãy nói rõ là chưa có.
 Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: prompt
-      });
-      
-      setMessages(prev => [...prev, { role: 'ai', text: response.text || "Không có phản hồi." }]);
+          const response = await client.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: prompt
+          });
+          
+          aiResponseText = response.text || '';
+        }
+      }
+
+      if (aiResponseText) {
+        setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
+      } else {
+        setMessages(prev => [...prev, { 
+          role: 'ai', 
+          text: "Chưa thể kết nối tới não bộ AI. Vui lòng kiểm tra lại kết nối mạng hoặc cấu hình Khóa API Gemini." 
+        }]);
+      }
     } catch (err: any) {
       console.error(err);
-      let errMsg = err.message;
+      let errMsg = err?.message || String(err);
       if (errMsg && errMsg.includes("API key")) {
-        errMsg = "Không tìm thấy Khóa API Gemini hợp lệ trên GitHub. Bạn cần cấu hình GitHub Secrets.";
+        errMsg = "Không tìm thấy Khóa API Gemini hợp lệ. Bạn cần cấu hình GitHub Secrets hoặc biến môi trường.";
       }
       setMessages(prev => [...prev, { role: 'ai', text: "Lỗi kết nối tới não bộ AI: " + errMsg }]);
     } finally {

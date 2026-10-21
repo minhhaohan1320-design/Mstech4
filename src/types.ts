@@ -1,12 +1,29 @@
+// ==============================================================
+// TỆP 2: src/types.ts
+// Chuẩn hóa toàn bộ trường dữ liệu giữa ESP32 và giao diện Web
+// ==============================================================
+
 export interface SensorData {
-  n: number | null;
-  p: number | null;
-  k: number | null;
-  moisture: number | null;
-  soilTemp: number | null;
-  waterTemp: number | null;
-  ph: number | null;
-  timestamp: number | null;
+  // Trường dữ liệu chuẩn gửi từ esp32_mstech_station.ino
+  n: number;
+  p: number;
+  k: number;
+  moisture: number;
+  soilTemp: number;
+  waterTemp: number;
+  ph: number;
+  timestamp: number;
+
+  // Trường tương thích ngược cho các thành phần giao diện dùng mảng
+  npk_data?: {
+    n: number[];
+    p: number[];
+    k: number[];
+  };
+  do_am_dat?: number[];
+  nhiet_do_dat?: number[];
+  ph_data?: number[];
+  temp_nuoc?: number;
 }
 
 export interface StationCommand {
@@ -19,8 +36,9 @@ export interface StationCommand {
 export interface StationStatus {
   online: boolean;
   lastSeen: number;
-  wifiRSSI: number;
-  firmwareVersion: string;
+  rssi?: number;
+  wifiRSSI?: number;
+  firmwareVersion?: string;
 }
 
 export interface Station {
@@ -29,7 +47,13 @@ export interface Station {
   Status?: StationStatus;
 }
 
-export interface HistoryRecord extends SensorData {}
+export interface HistoryRecord extends SensorData {
+  id?: string;
+  zone?: string;
+  cropName?: string;
+  dateStr?: string;
+  timeStr?: string;
+}
 
 export interface AIInsight {
   summary: string;
@@ -62,4 +86,3 @@ export interface MeasurementState {
 }
 
 export type DemoModeType = boolean;
-

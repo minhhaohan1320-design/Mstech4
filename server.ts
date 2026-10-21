@@ -6,14 +6,33 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+  apiKey,
   httpOptions: {
     headers: {
       'User-Agent': 'aistudio-build',
     }
   }
 });
+
+async function generateWithFallback(params: { contents: any; config?: any }) {
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash"];
+  let lastError: any = null;
+  for (const model of models) {
+    try {
+      return await ai.models.generateContent({
+        model,
+        contents: params.contents,
+        config: params.config,
+      });
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Model ${model} failed, trying next:`, err?.message || err);
+    }
+  }
+  throw lastError;
+}
 
 async function startServer() {
   const app = express();
@@ -30,8 +49,7 @@ async function startServer() {
         return res.status(400).json({ error: "Không tìm thấy dữ liệu PDF." });
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const response = await generateWithFallback({
         contents: [
           promptText || "Hãy phân tích nội dung tài liệu này và đưa ra nhận xét, tóm tắt những điểm chính liên quan đến nông nghiệp.",
           {
@@ -46,7 +64,7 @@ async function startServer() {
       res.json({ result: response.text });
     } catch (error: any) {
       console.error("AI PDF Error:", error);
-      res.status(500).json({ error: "Lỗi khi phân tích PDF: " + error.message });
+      res.status(500).json({ error: "Lỗi khi phân tích PDF: " + (error?.message || error) });
     }
   });
 
@@ -70,8 +88,7 @@ Nếu thiếu dữ liệu nào (null/undefined), hãy ghi rõ là "Chưa có d�
 Tuyệt đối KHÔNG tự tạo dữ liệu bịa đặt.
 Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const response = await generateWithFallback({
         contents: prompt,
         config: {
           systemInstruction: "Bạn là M.S.AI - Trợ lý phân tích nông nghiệp. Trả về đúng định dạng JSON được yêu cầu.",
@@ -103,7 +120,7 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
       res.json(JSON.parse(response.text || '{}'));
     } catch (error: any) {
       console.error("AI Analyze Error:", error);
-      res.status(500).json({ error: "Lỗi khi gọi AI: " + error.message });
+      res.status(500).json({ error: "Lỗi khi gọi AI: " + (error?.message || error) });
     }
   });
 
@@ -139,15 +156,14 @@ ${dataContext}
 Tuyệt đối không tự bịa dữ liệu. Nếu thông số nào chưa có, hãy nói rõ là chưa có.
 Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const response = await generateWithFallback({
         contents: prompt
       });
 
       res.json({ result: response.text });
     } catch (error: any) {
       console.error("AI Chat Error:", error);
-      res.status(500).json({ error: "Lỗi khi gọi AI: " + error.message });
+      res.status(500).json({ error: "Lỗi khi gọi AI: " + (error?.message || error) });
     }
   });
 

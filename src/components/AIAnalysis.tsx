@@ -3,7 +3,7 @@ import { SensorData, AIInsight } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Sparkles, Loader2, AlertTriangle, TrendingUp, CheckCircle } from 'lucide-react';
-import { ai, Type } from '../lib/gemini';
+import { getGeminiClient, Type } from '../lib/gemini';
 
 interface AIAnalysisProps {
   data: SensorData | null;
@@ -20,7 +20,41 @@ export const AIAnalysis: React.FC<AIAnalysisProps> = ({ data, hideCard }) => {
     setIsAnalyzing(true);
 
     try {
-      const prompt = `Bạn là một chuyên gia nông nghiệp thông minh. Dữ liệu cảm biến đo được từ trạm quan trắc nông nghiệp tại khu vực Bắc Giang như sau:
+      let resData: AIInsight | null = null;
+
+      // 1. Ưu tiên gọi API backend (/api/analyze)
+      try {
+        const response = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cropType: cropType || 'Chưa rõ',
+            location: 'Bắc Giang',
+            n: data.n,
+            p: data.p,
+            k: data.k,
+            moisture: data.moisture,
+            soilTemp: data.soilTemp,
+            ph: data.ph,
+            waterTemp: data.waterTemp,
+          }),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json && json.summary) {
+            resData = json;
+          }
+        }
+      } catch (fetchErr) {
+        console.warn("Không thể gọi /api/analyze từ server, thử fallback:", fetchErr);
+      }
+
+      // 2. Fallback sang client-side Gemini nếu có cấu hình VITE_GEMINI_API_KEY
+      if (!resData) {
+        const client = getGeminiClient();
+        if (client) {
+          const prompt = `Bạn là một chuyên gia nông nghiệp thông minh. Dữ liệu cảm biến đo được từ trạm quan trắc nông nghiệp tại khu vực Bắc Giang như sau:
 - Giống cây: ${cropType || 'Chưa rõ'}
 - Nitơ (N): ${data.n ?? 'Chưa có'} mg/kg
 - Phốt pho (P): ${data.p ?? 'Chưa có'} mg/kg
@@ -34,48 +68,54 @@ Nếu thiếu dữ liệu nào (null/undefined), hãy ghi rõ là "Chưa có d�
 Tuyệt đối KHÔNG tự tạo dữ liệu bịa đặt.
 Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: "Bạn là M.S.AI - Trợ lý phân tích nông nghiệp. Trả về đúng định dạng JSON được yêu cầu.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summary: { type: Type.STRING, description: "Đánh giá tổng quan về tình trạng." },
-              nutrients: {
+          const response = await client.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: prompt,
+            config: {
+              systemInstruction: "Bạn là M.S.AI - Trợ lý phân tích nông nghiệp. Trả về đúng định dạng JSON được yêu cầu.",
+              responseMimeType: "application/json",
+              responseSchema: {
                 type: Type.OBJECT,
                 properties: {
-                  n: { type: Type.STRING, description: "Nhận xét về Nitơ." },
-                  p: { type: Type.STRING, description: "Nhận xét về Phốt pho." },
-                  k: { type: Type.STRING, description: "Nhận xét về Kali." }
-                }
-              },
-              moisture: { type: Type.STRING, description: "Nhận xét về độ ẩm." },
-              ph: { type: Type.STRING, description: "Nhận xét về pH." },
-              temperature: { type: Type.STRING, description: "Nhận xét về nhiệt độ đất và nước." },
-              anomalies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các dấu hiệu bất thường nếu có." },
-              trends: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Xu hướng hiện tại." },
-              recommendations: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các hành động khuyến nghị." }
-            },
-            required: ["summary", "nutrients", "moisture", "ph", "temperature", "anomalies", "trends", "recommendations"]
+                  summary: { type: Type.STRING, description: "Đánh giá tổng quan về tình trạng." },
+                  nutrients: {
+                    type: Type.OBJECT,
+                    properties: {
+                      n: { type: Type.STRING, description: "Nhận xét về Nitơ." },
+                      p: { type: Type.STRING, description: "Nhận xét về Phốt pho." },
+                      k: { type: Type.STRING, description: "Nhận xét về Kali." }
+                    }
+                  },
+                  moisture: { type: Type.STRING, description: "Nhận xét về độ ẩm." },
+                  ph: { type: Type.STRING, description: "Nhận xét về pH." },
+                  temperature: { type: Type.STRING, description: "Nhận xét về nhiệt độ đất và nước." },
+                  anomalies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các dấu hiệu bất thường nếu có." },
+                  trends: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Xu hướng hiện tại." },
+                  recommendations: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các hành động khuyến nghị." }
+                },
+                required: ["summary", "nutrients", "moisture", "ph", "temperature", "anomalies", "trends", "recommendations"]
+              }
+            }
+          });
+
+          const parsed = JSON.parse(response.text || '{}');
+          if (parsed && parsed.summary) {
+            resData = parsed;
           }
         }
-      });
-      
-      const resData = JSON.parse(response.text || '{}');
-      if (resData && resData.summary) {
+      }
+
+      if (resData) {
         setAnalysis(resData);
       } else {
-        alert("Có lỗi xảy ra khi phân tích (Dữ liệu không đúng chuẩn).");
+        alert("Lỗi kết nối AI: Chưa thể kết nối tới máy chủ AI hoặc chưa cấu hình Khóa API Gemini hợp lệ.");
       }
     } catch (error: any) {
       console.error(error);
       if (error.message && error.message.includes("API key")) {
          alert("Lỗi: Không tìm thấy Khóa API Gemini hợp lệ. Vui lòng kiểm tra lại cấu hình GitHub Secrets.");
       } else {
-         alert("Lỗi kết nối AI: " + error.message);
+         alert("Lỗi kết nối AI: " + (error?.message || error));
       }
     } finally {
       setIsAnalyzing(false);

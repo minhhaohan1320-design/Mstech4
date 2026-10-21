@@ -5,7 +5,7 @@ import { ChibiMarine } from './ChibiMarine';
 import { Filter } from 'lucide-react';
 
 interface HistoryChartProps {
-  historyData: (SensorData & { timeStr: string })[];
+  historyData: (SensorData & { timeStr?: string; id?: string })[];
   hideCard?: boolean;
 }
 
