@@ -1,25 +1,110 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
-let geminiClientInstance: GoogleGenAI | null = null;
+import { AIInsight, SensorData } from "../types";
+import {
+  evaluateAgriculturalInsight,
+  generateChatReply,
+} from "../utils/stationLogic";
 
 /**
- * Lấy client GoogleGenAI trên trình duyệt (nếu có VITE_GEMINI_API_KEY)
- * Tránh lỗi crash ứng dụng khi khởi tạo ở top-level nếu thiếu API key.
+ * Gọi API phân tích nông học phía máy chủ (/api/analyze)
  */
-export const getGeminiClient = (): GoogleGenAI | null => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '' || apiKey === 'undefined') {
-    return null;
-  }
-  if (!geminiClientInstance) {
-    try {
-      geminiClientInstance = new GoogleGenAI({ apiKey: apiKey.trim() });
-    } catch (err) {
-      console.warn("Không thể khởi tạo Gemini client phía trình duyệt:", err);
-      return null;
-    }
-  }
-  return geminiClientInstance;
-};
+export async function requestAIAnalysis(params: {
+  cropType: string;
+  location: string;
+  data: SensorData;
+}): Promise<AIInsight> {
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cropType: params.cropType || "Cây trồng",
+        location: params.location || "Bắc Giang",
+        n: params.data.n,
+        p: params.data.p,
+        k: params.data.k,
+        moisture: params.data.moisture,
+        soilTemp: params.data.soilTemp,
+        ph: params.data.ph,
+        waterTemp: params.data.waterTemp,
+      }),
+    });
 
-export { Type };
+    if (response.ok) {
+      const json = await response.json();
+      if (json && json.summary) {
+        return json as AIInsight;
+      }
+    }
+  } catch (err) {
+    console.warn("Lỗi kết nối /api/analyze, sử dụng bộ đánh giá nội bộ:", err);
+  }
+
+  return evaluateAgriculturalInsight({
+    cropType: params.cropType,
+    location: params.location,
+    n: params.data.n,
+    p: params.data.p,
+    k: params.data.k,
+    moisture: params.data.moisture,
+    soilTemp: params.data.soilTemp,
+    ph: params.data.ph,
+    waterTemp: params.data.waterTemp,
+  });
+}
+
+/**
+ * Gọi API trò chuyện M.S.AI phía máy chủ (/api/chat)
+ */
+export async function requestAIChat(
+  userMessage: string,
+  sensorData: SensorData | null
+): Promise<string> {
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userMessage,
+        sensorData,
+      }),
+    });
+
+    if (response.ok) {
+      const json = await response.json();
+      if (json?.result) {
+        return json.result;
+      }
+    }
+  } catch (err) {
+    console.warn("Lỗi kết nối /api/chat, sử dụng phản hồi nội bộ:", err);
+  }
+
+  return generateChatReply(userMessage, sensorData);
+}
+
+/**
+ * Gọi API phân tích tài liệu PDF phía máy chủ (/api/analyze-pdf)
+ */
+export async function requestPdfAnalysis(
+  pdfBase64: string,
+  fileName: string,
+  promptText?: string
+): Promise<string> {
+  const response = await fetch("/api/analyze-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pdfBase64,
+      fileName,
+      promptText,
+    }),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData?.error || "Không thể phân tích file PDF.");
+  }
+
+  const data = await response.json();
+  return data.result || "Đã hoàn tất phân tích tài liệu PDF.";
+}

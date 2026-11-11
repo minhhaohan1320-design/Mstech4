@@ -1,15 +1,27 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { ChibiMarine } from './ChibiMarine';
-import { Share2 } from 'lucide-react';
+import { Share2, Check } from 'lucide-react';
 
 interface QRCodeDisplayProps {
   deviceId: string;
 }
 
 export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({ deviceId }) => {
-  const currentUrl = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain';
+  const [copied, setCopied] = useState(false);
+  const currentUrl = typeof window !== 'undefined' ? window.location.origin : 'https://mstech.local';
   const shareUrl = `${currentUrl}/station/${deviceId}`;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -26,21 +38,30 @@ export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({ deviceId }) => {
       <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 flex flex-col items-center text-center">
         <h3 className="text-lg font-bold text-gray-900 mb-2">{deviceId}</h3>
         <p className="text-sm text-gray-500 mb-8">Quét mã này để mở trực tiếp dashboard của trạm.</p>
-        
+
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 mb-6">
           <QRCodeSVG value={shareUrl} size={200} level="H" />
         </div>
 
         <div className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
           <span className="text-xs text-gray-500 truncate mr-2">{shareUrl}</span>
-          <button 
-            onClick={() => {
-              navigator.clipboard.writeText(shareUrl);
-              alert("Đã copy đường dẫn!");
-            }}
-            className="p-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-colors"
+          <button
+            type="button"
+            onClick={handleCopy}
+            aria-label="Sao chép đường dẫn trạm"
+            className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-colors flex items-center space-x-1.5 text-xs font-bold shrink-0"
           >
-            <Share2 className="w-4 h-4" />
+            {copied ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Đã chép</span>
+              </>
+            ) : (
+              <>
+                <Share2 className="w-4 h-4" />
+                <span>Sao chép</span>
+              </>
+            )}
           </button>
         </div>
       </div>

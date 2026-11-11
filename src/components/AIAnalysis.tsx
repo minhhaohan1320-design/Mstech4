@@ -1,122 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SensorData, AIInsight } from '../types';
-import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Sparkles, Loader2, AlertTriangle, TrendingUp, CheckCircle } from 'lucide-react';
-import { getGeminiClient, Type } from '../lib/gemini';
+import { requestAIAnalysis } from '../lib/gemini';
 
 interface AIAnalysisProps {
   data: SensorData | null;
   hideCard?: boolean;
+  defaultCrop?: string;
+  defaultLocation?: string;
 }
 
-export const AIAnalysis: React.FC<AIAnalysisProps> = ({ data, hideCard }) => {
+export const AIAnalysis: React.FC<AIAnalysisProps> = ({
+  data,
+  hideCard,
+  defaultCrop = 'Vải thiều',
+  defaultLocation = 'Bắc Giang',
+}) => {
   const [analysis, setAnalysis] = useState<AIInsight | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [cropType, setCropType] = useState('Lúa');
+  const [cropType, setCropType] = useState(defaultCrop);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (defaultCrop && defaultCrop.trim()) {
+      setCropType(defaultCrop);
+    }
+  }, [defaultCrop]);
 
   const handleAnalyze = async () => {
     if (!data) return;
     setIsAnalyzing(true);
+    setErrorMsg(null);
 
     try {
-      let resData: AIInsight | null = null;
-
-      // 1. Ưu tiên gọi API backend (/api/analyze)
-      try {
-        const response = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            cropType: cropType || 'Chưa rõ',
-            location: 'Bắc Giang',
-            n: data.n,
-            p: data.p,
-            k: data.k,
-            moisture: data.moisture,
-            soilTemp: data.soilTemp,
-            ph: data.ph,
-            waterTemp: data.waterTemp,
-          }),
-        });
-
-        if (response.ok) {
-          const json = await response.json();
-          if (json && json.summary) {
-            resData = json;
-          }
-        }
-      } catch (fetchErr) {
-        console.warn("Không thể gọi /api/analyze từ server, thử fallback:", fetchErr);
-      }
-
-      // 2. Fallback sang client-side Gemini nếu có cấu hình VITE_GEMINI_API_KEY
-      if (!resData) {
-        const client = getGeminiClient();
-        if (client) {
-          const prompt = `Bạn là một chuyên gia nông nghiệp thông minh. Dữ liệu cảm biến đo được từ trạm quan trắc nông nghiệp tại khu vực Bắc Giang như sau:
-- Giống cây: ${cropType || 'Chưa rõ'}
-- Nitơ (N): ${data.n ?? 'Chưa có'} mg/kg
-- Phốt pho (P): ${data.p ?? 'Chưa có'} mg/kg
-- Kali (K): ${data.k ?? 'Chưa có'} mg/kg
-- Độ ẩm đất: ${data.moisture ?? 'Chưa có'} %
-- Nhiệt độ đất: ${data.soilTemp ?? 'Chưa có'} °C
-- Độ pH: ${data.ph ?? 'Chưa có'}
-- Nhiệt độ nước: ${data.waterTemp ?? 'Chưa có'} °C
-
-Nếu thiếu dữ liệu nào (null/undefined), hãy ghi rõ là "Chưa có dữ liệu [tên thông số]".
-Tuyệt đối KHÔNG tự tạo dữ liệu bịa đặt.
-Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
-
-          const response = await client.models.generateContent({
-            model: "gemini-3.8-flash",
-            contents: prompt,
-            config: {
-              systemInstruction: "Bạn là M.S.AI - Trợ lý phân tích nông nghiệp. Trả về đúng định dạng JSON được yêu cầu.",
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  summary: { type: Type.STRING, description: "Đánh giá tổng quan về tình trạng." },
-                  nutrients: {
-                    type: Type.OBJECT,
-                    properties: {
-                      n: { type: Type.STRING, description: "Nhận xét về Nitơ." },
-                      p: { type: Type.STRING, description: "Nhận xét về Phốt pho." },
-                      k: { type: Type.STRING, description: "Nhận xét về Kali." }
-                    }
-                  },
-                  moisture: { type: Type.STRING, description: "Nhận xét về độ ẩm." },
-                  ph: { type: Type.STRING, description: "Nhận xét về pH." },
-                  temperature: { type: Type.STRING, description: "Nhận xét về nhiệt độ đất và nước." },
-                  anomalies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các dấu hiệu bất thường nếu có." },
-                  trends: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Xu hướng hiện tại." },
-                  recommendations: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Các hành động khuyến nghị." }
-                },
-                required: ["summary", "nutrients", "moisture", "ph", "temperature", "anomalies", "trends", "recommendations"]
-              }
-            }
-          });
-
-          const parsed = JSON.parse(response.text || '{}');
-          if (parsed && parsed.summary) {
-            resData = parsed;
-          }
-        }
-      }
-
-      if (resData) {
-        setAnalysis(resData);
-      } else {
-        alert("Lỗi kết nối AI: Chưa thể kết nối tới máy chủ AI hoặc chưa cấu hình Khóa API Gemini hợp lệ.");
-      }
+      const resData = await requestAIAnalysis({
+        cropType: cropType || 'Vải thiều',
+        location: defaultLocation || 'Bắc Giang',
+        data,
+      });
+      setAnalysis(resData);
     } catch (error: any) {
       console.error(error);
-      if (error.message && error.message.includes("API key")) {
-         alert("Lỗi: Không tìm thấy Khóa API Gemini hợp lệ. Vui lòng kiểm tra lại cấu hình GitHub Secrets.");
-      } else {
-         alert("Lỗi kết nối AI: " + (error?.message || error));
-      }
+      setErrorMsg('Lỗi kết nối AI: ' + (error?.message || String(error)));
     } finally {
       setIsAnalyzing(false);
     }
@@ -137,9 +63,11 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
       )}
 
       <div>
-        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 ml-1">AI Chiến Lược - Cây trồng mục tiêu</label>
-        <input 
-          type="text" 
+        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 ml-1">
+          AI Chiến Lược - Cây trồng mục tiêu
+        </label>
+        <input
+          type="text"
           value={cropType}
           onChange={(e) => setCropType(e.target.value)}
           placeholder="Nhập tên cây trồng (VD: Vải thiều, Lúa...)"
@@ -147,6 +75,7 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
         />
 
         <button
+          type="button"
           onClick={handleAnalyze}
           disabled={isAnalyzing || !data}
           className="w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center space-x-2 shadow-md shadow-emerald-200 hover:bg-emerald-700 transition-colors disabled:opacity-50"
@@ -164,7 +93,14 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
           )}
         </button>
         {!data && (
-          <p className="text-xs text-red-500 mt-3 text-center font-bold tracking-wide">Cần có dữ liệu cảm biến để phân tích.</p>
+          <p className="text-xs text-red-500 mt-3 text-center font-bold tracking-wide">
+            Cần có dữ liệu cảm biến để phân tích.
+          </p>
+        )}
+        {errorMsg && (
+          <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium text-center">
+            {errorMsg}
+          </div>
         )}
       </div>
 
@@ -202,14 +138,16 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
             </div>
           </div>
 
-          {(analysis.anomalies?.length > 0) && (
+          {analysis.anomalies?.length > 0 && (
             <div className="bg-red-50 rounded-2xl p-5 border border-red-100">
               <h3 className="font-bold text-red-800 mb-3 flex items-center text-[10px] uppercase tracking-widest">
                 <AlertTriangle className="w-4 h-4 mr-2" />
                 Bất thường
               </h3>
               <ul className="list-disc pl-5 text-sm text-red-700 space-y-1.5 font-medium">
-                {analysis.anomalies.map((item, i) => <li key={i}>{item}</li>)}
+                {analysis.anomalies.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
               </ul>
             </div>
           )}
@@ -220,7 +158,9 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
               Xu hướng
             </h3>
             <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1.5 font-medium">
-              {analysis.trends?.map((item, i) => <li key={i}>{item}</li>)}
+              {analysis.trends?.map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
             </ul>
           </div>
 
@@ -230,7 +170,9 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
               Khuyến nghị
             </h3>
             <ul className="list-disc pl-5 text-sm text-emerald-700 space-y-1.5 font-medium">
-              {analysis.recommendations?.map((item, i) => <li key={i}>{item}</li>)}
+              {analysis.recommendations?.map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
             </ul>
           </div>
 

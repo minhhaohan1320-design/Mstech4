@@ -3,99 +3,35 @@ import { SensorData } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Send, Loader2 } from 'lucide-react';
-import { getGeminiClient } from '../lib/gemini';
+import { requestAIChat } from '../lib/gemini';
 
 interface AIChatProps {
   data: SensorData | null;
 }
 
 export const AIChat: React.FC<AIChatProps> = ({ data }) => {
-  const [messages, setMessages] = useState<{role: 'user' | 'ai', text: string}[]>([]);
+  const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
 
   const handleSend = async () => {
     if (!input.trim()) return;
-    
+
     const userMsg = input.trim();
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    setMessages((prev) => [...prev, { role: 'user', text: userMsg }]);
     setInput('');
     setIsTyping(true);
 
     try {
-      let aiResponseText = '';
-
-      // 1. Ưu tiên gọi API backend (/api/chat)
-      try {
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userMessage: userMsg,
-            sensorData: data,
-          }),
-        });
-
-        if (response.ok) {
-          const json = await response.json();
-          if (json?.result) {
-            aiResponseText = json.result;
-          }
-        }
-      } catch (fetchErr) {
-        console.warn("Không thể gọi /api/chat từ server, thử fallback:", fetchErr);
-      }
-
-      // 2. Fallback sang client-side Gemini nếu có VITE_GEMINI_API_KEY
-      if (!aiResponseText) {
-        const client = getGeminiClient();
-        if (client) {
-          const n = data?.n;
-          const p = data?.p;
-          const k = data?.k;
-          const moisture = data?.moisture;
-          const soilTemp = data?.soilTemp;
-          const ph = data?.ph;
-          const waterTemp = data?.waterTemp;
-
-          const dataContext = data ? `Dữ liệu cảm biến hiện tại:
-- N: ${n ?? 'Chưa có'} mg/kg
-- P: ${p ?? 'Chưa có'} mg/kg
-- K: ${k ?? 'Chưa có'} mg/kg
-- Độ ẩm: ${moisture ?? 'Chưa có'} %
-- Nhiệt độ đất: ${soilTemp ?? 'Chưa có'} °C
-- pH: ${ph ?? 'Chưa có'}
-- Nhiệt độ nước: ${waterTemp ?? 'Chưa có'} °C` : "Hiện tại chưa có dữ liệu cảm biến.";
-
-          const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh. Người dùng hỏi: "${userMsg}". 
-${dataContext}
-Tuyệt đối không tự bịa dữ liệu. Nếu thông số nào chưa có, hãy nói rõ là chưa có.
-Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.`;
-
-          const response = await client.models.generateContent({
-            model: "gemini-3.8-flash",
-            contents: prompt
-          });
-          
-          aiResponseText = response.text || '';
-        }
-      }
-
-      if (aiResponseText) {
-        setMessages(prev => [...prev, { role: 'ai', text: aiResponseText }]);
-      } else {
-        setMessages(prev => [...prev, { 
-          role: 'ai', 
-          text: "Chưa thể kết nối tới não bộ AI. Vui lòng kiểm tra lại kết nối mạng hoặc cấu hình Khóa API Gemini." 
-        }]);
-      }
+      const aiResponseText = await requestAIChat(userMsg, data);
+      setMessages((prev) => [...prev, { role: 'ai', text: aiResponseText }]);
     } catch (err: any) {
       console.error(err);
-      let errMsg = err?.message || String(err);
-      if (errMsg && errMsg.includes("API key")) {
-        errMsg = "Không tìm thấy Khóa API Gemini hợp lệ. Bạn cần cấu hình GitHub Secrets hoặc biến môi trường.";
-      }
-      setMessages(prev => [...prev, { role: 'ai', text: "Lỗi kết nối tới não bộ AI: " + errMsg }]);
+      const errMsg = err?.message || String(err);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'ai', text: 'Lỗi kết nối tới não bộ AI: ' + errMsg },
+      ]);
     } finally {
       setIsTyping(false);
     }
@@ -115,7 +51,11 @@ Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.
             <p className="text-xs text-emerald-100">Trợ lý Nông nghiệp Thông minh</p>
           </div>
         </div>
-        <button onClick={clearChat} className="text-xs font-semibold px-3 py-1 bg-emerald-700 rounded-lg hover:bg-emerald-800 transition-colors">
+        <button
+          type="button"
+          onClick={clearChat}
+          className="text-xs font-semibold px-3 py-1 bg-emerald-700 rounded-lg hover:bg-emerald-800 transition-colors"
+        >
           Xóa
         </button>
       </div>
@@ -128,7 +68,13 @@ Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] p-3 rounded-2xl ${msg.role === 'user' ? 'bg-emerald-600 text-white rounded-br-sm' : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm'}`}>
+            <div
+              className={`max-w-[80%] p-3 rounded-2xl ${
+                msg.role === 'user'
+                  ? 'bg-emerald-600 text-white rounded-br-sm'
+                  : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm'
+              }`}
+            >
               <div className="prose prose-sm max-w-none text-current">
                 <Markdown>{msg.text}</Markdown>
               </div>
@@ -146,17 +92,20 @@ Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.
       </div>
 
       <div className="p-3 bg-white border-t border-gray-100 flex items-center space-x-2">
-        <input 
-          type="text" 
+        <input
+          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder="Nhắn tin cho M.S.AI..."
+          aria-label="Nhắn tin cho M.S.AI"
           className="flex-1 px-4 py-2 bg-gray-100 rounded-full outline-none focus:ring-2 focus:ring-emerald-500"
         />
-        <button 
+        <button
+          type="button"
           onClick={handleSend}
           disabled={!input.trim() || isTyping}
+          aria-label="Gửi tin nhắn"
           className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center disabled:opacity-50"
         >
           <Send className="w-4 h-4" />
