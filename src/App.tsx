@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { BottomNavigation } from './components/BottomNavigation';
 import { Dashboard } from './components/Dashboard';
@@ -7,10 +7,13 @@ import { AIAnalysis } from './components/AIAnalysis';
 import { AIChat } from './components/AIChat';
 import { WifiConfig } from './components/WifiConfig';
 import { QRCodeDisplay } from './components/QRCodeDisplay';
-import { QRScanner } from './components/QRScanner';
+import { QRScanner, decodeQrFromImageFile } from './components/QRScanner';
 import { useStation } from './hooks/useStation';
 import { parseStationId } from './utils/stationLogic';
 import { QrCode, Image as ImageIcon } from 'lucide-react';
+
+const SESSION_DEVICE_KEY = 'mstech_active_device_id';
+const SESSION_DEMO_KEY = 'mstech_active_demo';
 
 export default function App() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
@@ -18,6 +21,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isScanning, setIsScanning] = useState(false);
   const [stationInput, setStationInput] = useState('');
+  const [qrUploadError, setQrUploadError] = useState<string | null>(null);
+  const qrFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -33,10 +38,75 @@ export default function App() {
         const parsed = parseStationId(pathParts[stationIndex + 1]);
         if (parsed) {
           setDeviceId(parsed);
+          return;
         }
+      }
+
+      try {
+        const savedDevice = sessionStorage.getItem(SESSION_DEVICE_KEY);
+        const savedDemo = sessionStorage.getItem(SESSION_DEMO_KEY);
+        if (savedDevice) {
+          setDeviceId(savedDevice);
+        } else if (savedDemo === '1') {
+          setIsDemo(true);
+        }
+      } catch {
+        // Bỏ qua nếu trình duyệt chặn sessionStorage
       }
     }
   }, []);
+
+  const handleSelectDevice = (id: string) => {
+    const clean = parseStationId(id);
+    if (!clean) return;
+    setDeviceId(clean);
+    setIsDemo(false);
+    setQrUploadError(null);
+    try {
+      sessionStorage.setItem(SESSION_DEVICE_KEY, clean);
+      sessionStorage.removeItem(SESSION_DEMO_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectDemo = () => {
+    setIsDemo(true);
+    setDeviceId(null);
+    setQrUploadError(null);
+    try {
+      sessionStorage.setItem(SESSION_DEMO_KEY, '1');
+      sessionStorage.removeItem(SESSION_DEVICE_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSwitchStation = () => {
+    setDeviceId(null);
+    setIsDemo(false);
+    setActiveTab('home');
+    setQrUploadError(null);
+    try {
+      sessionStorage.removeItem(SESSION_DEVICE_KEY);
+      sessionStorage.removeItem(SESSION_DEMO_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDirectQrImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setQrUploadError(null);
+    const decoded = await decodeQrFromImageFile(file);
+    if (decoded) {
+      handleSelectDevice(decoded);
+    } else {
+      setQrUploadError('Không tìm thấy mã QR trạm hợp lệ trong ảnh đã chọn.');
+    }
+    e.target.value = '';
+  };
 
   const {
     sensorData,
@@ -68,7 +138,10 @@ export default function App() {
           <div className="grid grid-cols-2 gap-4">
             <button
               type="button"
-              onClick={() => setIsScanning(true)}
+              onClick={() => {
+                setQrUploadError(null);
+                setIsScanning(true);
+              }}
               className="flex flex-col items-center justify-center bg-white border border-emerald-100 text-emerald-700 rounded-3xl p-6 shadow-sm hover:bg-emerald-50 transition-all hover:scale-[1.02]"
             >
               <div className="bg-emerald-100 p-3 rounded-2xl mb-3">
@@ -78,7 +151,7 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={() => setIsScanning(true)}
+              onClick={() => qrFileInputRef.current?.click()}
               className="flex flex-col items-center justify-center bg-white border border-emerald-100 text-emerald-700 rounded-3xl p-6 shadow-sm hover:bg-emerald-50 transition-all hover:scale-[1.02]"
             >
               <div className="bg-emerald-100 p-3 rounded-2xl mb-3">
@@ -90,16 +163,27 @@ export default function App() {
                 từ thư viện
               </span>
             </button>
+            <input
+              ref={qrFileInputRef}
+              type="file"
+              accept="image/*"
+              aria-label="Tải ảnh QR từ thư viện"
+              onChange={handleDirectQrImageUpload}
+              className="sr-only"
+            />
           </div>
+
+          {qrUploadError && (
+            <div className="p-3 bg-red-50 border border-red-100 text-red-600 text-xs font-semibold rounded-2xl text-center">
+              {qrUploadError}
+            </div>
+          )}
 
           {isScanning && (
             <QRScanner
               onScanSuccess={(id) => {
-                const clean = parseStationId(id);
-                if (clean) {
-                  setDeviceId(clean);
-                  setIsScanning(false);
-                }
+                handleSelectDevice(id);
+                setIsScanning(false);
               }}
               onClose={() => setIsScanning(false)}
             />
@@ -115,10 +199,7 @@ export default function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const clean = parseStationId(stationInput);
-                if (clean) {
-                  setDeviceId(clean);
-                }
+                handleSelectDevice(stationInput);
               }}
             >
               <div className="mb-6 text-left">
@@ -147,7 +228,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setIsDemo(true)}
+                onClick={handleSelectDemo}
                 className="w-full bg-gray-50 text-gray-500 font-bold py-4 rounded-2xl border border-gray-200 hover:bg-gray-100 hover:text-gray-700 transition-colors"
               >
                 Xem bản Demo
@@ -159,12 +240,14 @@ export default function App() {
     );
   }
 
+  const currentStationId = isDemo ? 'DEMO_STATION' : deviceId || 'TRAM_BG_01';
+
   return (
     <div className="flex min-h-screen bg-gray-50 font-sans">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        deviceId={isDemo ? 'DEMO_STATION' : deviceId}
+        deviceId={currentStationId}
         isOnline={isOnline}
         className="hidden md:flex"
       />
@@ -177,17 +260,13 @@ export default function App() {
             </span>
             <span className="text-lg font-bold text-gray-900">M.S.Tech</span>
             <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-0.5 rounded-full">
-              {isDemo ? 'DEMO_STATION' : deviceId}
+              {currentStationId}
             </span>
           </div>
           {(deviceId || isDemo) && (
             <button
               type="button"
-              onClick={() => {
-                setDeviceId(null);
-                setIsDemo(false);
-                setActiveTab('home');
-              }}
+              onClick={handleSwitchStation}
               className="text-[11px] font-bold text-gray-600 bg-gray-100 px-3 py-2 rounded-xl hover:bg-gray-200 tracking-wider transition-colors"
             >
               ĐỔI TRẠM
@@ -198,7 +277,7 @@ export default function App() {
         <main className="flex-1 p-3 md:p-6 max-w-4xl mx-auto w-full">
           {activeTab === 'home' && (
             <Dashboard
-              deviceId={deviceId || 'DEMO_STATION'}
+              deviceId={currentStationId}
               data={sensorData}
               isOnline={isOnline}
               lastUpdated={lastUpdated}
@@ -226,13 +305,13 @@ export default function App() {
 
           {activeTab === 'settings' && (
             <div className="max-w-md mx-auto space-y-6 mt-4">
-              <WifiConfig deviceId={deviceId || 'DEMO_STATION'} onUpdateWifi={updateWifi} />
+              <WifiConfig deviceId={currentStationId} onUpdateWifi={updateWifi} />
             </div>
           )}
 
           {activeTab === 'stationInfo' && (
             <div className="max-w-md mx-auto space-y-6 mt-4">
-              <QRCodeDisplay deviceId={deviceId || 'DEMO_STATION'} />
+              <QRCodeDisplay deviceId={currentStationId} />
             </div>
           )}
         </main>

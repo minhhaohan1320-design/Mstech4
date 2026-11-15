@@ -39,15 +39,22 @@ async function generateWithFallback(params: { contents: any; config?: any }) {
     ...params.config,
     thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
   };
-  const callPromise = client.models.generateContent({
-    model: "gemini-3.8-flash",
-    contents: params.contents,
-    config: mergedConfig,
-  });
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("AI_REQUEST_TIMEOUT")), 2500)
-  );
-  return await Promise.race([callPromise, timeoutPromise]);
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const callPromise = client.models.generateContent({
+      model: "gemini-4-hydrogen",
+      contents: params.contents,
+      config: mergedConfig,
+    });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("AI_REQUEST_TIMEOUT")), 15000);
+    });
+    return await Promise.race([callPromise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 process.on("uncaughtException", (err) => {

@@ -10,6 +10,8 @@ export interface SensorData {
   k: number;
   moisture: number;
   soilTemp: number;
+  waterTemp?: number;
+  ph?: number;
   timestamp: number;
 
   // Trường tương thích ngược cho các thành phần giao diện dùng mảng
@@ -20,6 +22,15 @@ export interface SensorData {
   };
   do_am_dat?: number[];
   nhiet_do_dat?: number[];
+}
+
+export interface ZoneProfile {
+  id: string;
+  name: string;
+  location: string;
+  cropName: string;
+  variety: string;
+  coords: string;
 }
 
 export interface StationCommand {

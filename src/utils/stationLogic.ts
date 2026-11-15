@@ -29,20 +29,45 @@ export function parseStationId(rawInput: string): string {
 }
 
 /**
+ * Làm tròn số thực an toàn để tránh sai số dấu chấm động IEEE-754 khi ESP32 chia trung bình 3 lần đọc
+ */
+function roundTo(val: number, decimals: number): number {
+  const factor = Math.pow(10, decimals);
+  return Math.round(val * factor) / factor;
+}
+
+/**
  * Chuẩn hóa dữ liệu cảm biến thô từ ESP32-S3 / Firebase về cấu trúc SensorData thống nhất
  */
-export function normalizeSensorData(raw: Record<string, any> | null | undefined, fallbackTimestamp: number = Date.now()): SensorData {
-  const safeNum = (val: any, defaultVal = 0): number => {
+export function normalizeSensorData(
+  raw: Record<string, any> | null | undefined,
+  fallbackTimestamp: number = Date.now()
+): SensorData {
+  const safeNum = (val: any, defaultVal = 0, decimals = 1): number => {
+    if (Array.isArray(val) && val.length > 0) {
+      val = val[val.length - 1];
+    }
     const parsed = Number(val);
-    return Number.isFinite(parsed) ? parsed : defaultVal;
+    return Number.isFinite(parsed) ? roundTo(parsed, decimals) : defaultVal;
   };
 
-  const n = safeNum(raw?.n, 0);
-  const p = safeNum(raw?.p, 0);
-  const k = safeNum(raw?.k, 0);
-  const moisture = safeNum(raw?.moisture, 0);
-  const soilTemp = safeNum(raw?.soilTemp, 0);
-  const timestamp = typeof raw?.timestamp === 'number' && Number.isFinite(raw.timestamp) ? raw.timestamp : fallbackTimestamp;
+  const n = safeNum(raw?.n ?? raw?.npk_data?.n, 0, 0);
+  const p = safeNum(raw?.p ?? raw?.npk_data?.p, 0, 0);
+  const k = safeNum(raw?.k ?? raw?.npk_data?.k, 0, 0);
+  const moisture = safeNum(raw?.moisture ?? raw?.do_am_dat, 0, 1);
+  const soilTemp = safeNum(raw?.soilTemp ?? raw?.nhiet_do_dat, 0, 1);
+  const waterTemp = raw?.waterTemp !== undefined ? safeNum(raw.waterTemp, 0, 1) : undefined;
+  const ph = raw?.ph !== undefined ? safeNum(raw.ph, 0, 2) : undefined;
+
+  let timestamp = fallbackTimestamp;
+  if (typeof raw?.timestamp === 'number' && Number.isFinite(raw.timestamp) && raw.timestamp > 1000000000) {
+    timestamp = raw.timestamp;
+  } else if (typeof raw?.timestamp === 'string') {
+    const parsedTs = Number(raw.timestamp);
+    if (Number.isFinite(parsedTs) && parsedTs > 1000000000) {
+      timestamp = parsedTs;
+    }
+  }
 
   return {
     n,
@@ -50,10 +75,51 @@ export function normalizeSensorData(raw: Record<string, any> | null | undefined,
     k,
     moisture,
     soilTemp,
+    ...(waterTemp !== undefined ? { waterTemp } : {}),
+    ...(ph !== undefined ? { ph } : {}),
     timestamp,
     npk_data: { n: [n], p: [p], k: [k] },
     do_am_dat: [moisture],
     nhiet_do_dat: [soilTemp],
+  };
+}
+
+/**
+ * Chuyển đổi chuỗi tiếng Việt có dấu sang ASCII chuẩn phục vụ xuất báo cáo PDF (jsPDF standard font)
+ */
+export function sanitizePdfText(input: string): string {
+  if (!input) return '';
+  return input
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+
+/**
+ * Tính toán thống kê Nhỏ nhất / Trung bình / Lớn nhất cho tập dữ liệu lịch sử
+ */
+export function calculateHistoryStats(records: SensorData[]) {
+  if (!records || records.length === 0) {
+    return null;
+  }
+
+  const calc = (values: number[], decimals = 1) => {
+    const valid = values.filter((v) => typeof v === 'number' && Number.isFinite(v));
+    if (valid.length === 0) return { min: 0, max: 0, avg: 0 };
+    const min = roundTo(Math.min(...valid), decimals);
+    const max = roundTo(Math.max(...valid), decimals);
+    const sum = valid.reduce((acc, cur) => acc + cur, 0);
+    const avg = roundTo(sum / valid.length, decimals);
+    return { min, max, avg };
+  };
+
+  return {
+    n: calc(records.map((r) => r.n), 0),
+    p: calc(records.map((r) => r.p), 0),
+    k: calc(records.map((r) => r.k), 0),
+    moisture: calc(records.map((r) => r.moisture), 1),
+    soilTemp: calc(records.map((r) => r.soilTemp), 1),
   };
 }
 

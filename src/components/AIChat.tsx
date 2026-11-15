@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { SensorData } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
@@ -9,15 +9,28 @@ interface AIChatProps {
   data: SensorData | null;
 }
 
+const QUICK_PROMPTS = [
+  'Đất hiện tại cần bón phân gì?',
+  'Độ ẩm đất có phù hợp cho vải thiều?',
+  'Đánh giá cân bằng N-P-K hiện tại',
+];
+
 export const AIChat: React.FC<AIChatProps> = ({ data }) => {
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  useEffect(() => {
+    if (messages.length > 0 || isTyping) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [messages, isTyping]);
 
-    const userMsg = input.trim();
+  const sendMessageText = async (rawText: string) => {
+    const userMsg = rawText.trim();
+    if (!userMsg || isTyping) return;
+
     setMessages((prev) => [...prev, { role: 'user', text: userMsg }]);
     setInput('');
     setIsTyping(true);
@@ -35,6 +48,10 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
     } finally {
       setIsTyping(false);
     }
+  };
+
+  const handleSend = () => {
+    sendMessageText(input);
   };
 
   const clearChat = () => setMessages([]);
@@ -62,8 +79,20 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
         {messages.length === 0 && (
-          <div className="text-center text-gray-400 mt-10">
-            Hãy đặt câu hỏi về tình trạng đất của bạn cho M.S.AI!
+          <div className="text-center text-gray-400 mt-8 space-y-4">
+            <p className="text-sm">Hãy đặt câu hỏi về tình trạng đất của bạn cho M.S.AI!</p>
+            <div className="flex flex-wrap justify-center gap-2 max-w-md mx-auto">
+              {QUICK_PROMPTS.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => sendMessageText(q)}
+                  className="text-xs font-semibold text-emerald-700 bg-white border border-emerald-100 px-3 py-2 rounded-full hover:bg-emerald-50 transition-colors shadow-xs"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((msg, i) => (
@@ -75,7 +104,11 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
                   : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm shadow-sm'
               }`}
             >
-              <div className="prose prose-sm max-w-none text-current">
+              <div
+                className={`prose prose-sm max-w-none ${
+                  msg.role === 'user' ? 'prose-invert text-white' : 'text-gray-800'
+                }`}
+              >
                 <Markdown>{msg.text}</Markdown>
               </div>
             </div>
@@ -89,6 +122,7 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="p-3 bg-white border-t border-gray-100 flex items-center space-x-2">

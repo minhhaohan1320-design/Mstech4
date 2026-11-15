@@ -9,6 +9,44 @@ interface QRScannerProps {
   onClose: () => void;
 }
 
+/**
+ * Giải mã QR từ file ảnh (hỗ trợ tự động thu phóng ảnh độ phân giải lớn từ điện thoại)
+ */
+export function decodeQrFromImageFile(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve(null);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onerror = () => resolve(null);
+      img.onload = () => {
+        const tryDecodeAtScale = (maxDim: number): string | null => {
+          const canvas = document.createElement('canvas');
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            const ratio = Math.min(maxDim / width, maxDim / height);
+            width = Math.max(1, Math.round(width * ratio));
+            height = Math.max(1, Math.round(height * ratio));
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+          ctx.drawImage(img, 0, 0, width, height);
+          const imageData = ctx.getImageData(0, 0, width, height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height);
+          return code?.data ? parseStationId(code.data) : null;
+        };
+
+        const found = tryDecodeAtScale(1024) || tryDecodeAtScale(2048);
+        resolve(found);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onClose }) => {
   const [error, setError] = useState<string | null>(null);
 
@@ -22,33 +60,16 @@ export const QRScanner: React.FC<QRScannerProps> = ({ onScanSuccess, onClose }) 
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-        if (code && code.data) {
-          handleScan(code.data);
-        } else {
-          setError('Không tìm thấy mã QR trong ảnh. Vui lòng thử ảnh khác.');
-        }
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    setError(null);
+    const parsedId = await decodeQrFromImageFile(file);
+    if (parsedId) {
+      onScanSuccess(parsedId);
+    } else {
+      setError('Không tìm thấy mã QR hợp lệ trong ảnh. Vui lòng thử ảnh khác.');
+    }
   };
 
   return (

@@ -25,6 +25,8 @@ const NavItem = ({ id, icon, label, activeTab, setActiveTab }: { id: string, ico
   const active = activeTab === id;
   return (
     <button 
+      type="button"
+      aria-current={active ? 'page' : undefined}
       onClick={() => setActiveTab(id)} 
       className={`flex flex-col items-center p-2 rounded-xl transition-colors ${active ? 'text-emerald-600' : 'text-gray-400 hover:text-emerald-500'}`}
     >

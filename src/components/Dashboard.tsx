@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { SensorData, StationCommand, HistoryRecord } from '../types';
+import { SensorData, StationCommand, HistoryRecord, ZoneProfile } from '../types';
 import { ChibiMarine } from './ChibiMarine';
 import { HistoryChart } from './HistoryChart';
 import { AIAnalysis } from './AIAnalysis';
 import { requestPdfAnalysis } from '../lib/gemini';
+import { sanitizePdfText } from '../utils/stationLogic';
 import Markdown from 'react-markdown';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -34,6 +35,15 @@ interface DashboardProps {
   onNavigateToAI: () => void;
   historyData?: HistoryRecord[];
 }
+
+const DEFAULT_ZONE: ZoneProfile = {
+  id: 'zone-1',
+  name: 'Khu vực 1',
+  location: 'Bắc Giang',
+  cropName: 'Vải thiều',
+  variety: 'Thanh Hà',
+  coords: '21.2731° N, 106.1946° E (Bắc Giang)',
+};
 
 const MinimalSensorCard = ({ title, value, unit, icon, labelColor }: any) => {
   const isInvalid =
@@ -75,16 +85,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
   historyData = [],
 }) => {
   const [isMeasuring, setIsMeasuring] = useState(false);
+  const storageKey = `mstech_zones_${deviceId || 'default'}`;
 
-  // Tầng 1: Quản lý Khu vực & Thông tin canh tác
-  const [zones, setZones] = useState<string[]>(['Khu vực 1']);
-  const [activeZone, setActiveZone] = useState<string>('Khu vực 1');
-  const [location, setLocation] = useState<string>('Bắc Giang');
-  const [cropName, setCropName] = useState<string>('Vải thiều');
-  const [variety, setVariety] = useState<string>('Thanh Hà');
+  // Tầng 1: Quản lý Khu vực & Thông tin canh tác theo từng khu vực (có lưu trữ localStorage)
+  const [zoneProfiles, setZoneProfiles] = useState<ZoneProfile[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.name) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return [DEFAULT_ZONE];
+  });
+  const [activeZoneIdx, setActiveZoneIdx] = useState<number>(0);
 
-  // Tầng 2: Tọa độ GPS & thông báo trạng thái
-  const [coords, setCoords] = useState<string>('21.2731° N, 106.1946° E (Bắc Giang)');
+  // Tầng 2: thông báo trạng thái
   const [statusNote, setStatusNote] = useState<string | null>(null);
 
   // Quản lý dữ liệu dài hạn (PDF Report)
@@ -100,29 +120,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setIsMeasuring(Boolean(commandState?.read_soil));
   }, [commandState?.read_soil]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(zoneProfiles));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [zoneProfiles, storageKey]);
+
+  const currentZone: ZoneProfile = zoneProfiles[activeZoneIdx] || zoneProfiles[0] || DEFAULT_ZONE;
+  const activeZone = currentZone.name;
+  const location = currentZone.location;
+  const cropName = currentZone.cropName;
+  const variety = currentZone.variety;
+  const coords = currentZone.coords;
+
+  const updateCurrentZone = (patch: Partial<ZoneProfile>) => {
+    setZoneProfiles((prev) =>
+      prev.map((item, idx) => (idx === activeZoneIdx ? { ...item, ...patch } : item))
+    );
+  };
+
   const handleAddZone = () => {
-    const nextNum = zones.length + 1;
-    const newZone = `Khu vực ${nextNum}`;
-    setZones((prev) => [...prev, newZone]);
-    setActiveZone(newZone);
+    const nextNum = zoneProfiles.length + 1;
+    const newProfile: ZoneProfile = {
+      id: `zone-${Date.now()}-${nextNum}`,
+      name: `Khu vực ${nextNum}`,
+      location: currentZone.location || 'Bắc Giang',
+      cropName: currentZone.cropName || 'Vải thiều',
+      variety: currentZone.variety || 'Thanh Hà',
+      coords: currentZone.coords || DEFAULT_ZONE.coords,
+    };
+    const nextList = [...zoneProfiles, newProfile];
+    setZoneProfiles(nextList);
+    setActiveZoneIdx(nextList.length - 1);
   };
 
   const handleDeleteZone = () => {
-    if (zones.length <= 1) {
+    if (zoneProfiles.length <= 1) {
       setStatusNote('Cần giữ lại ít nhất 1 khu vực canh tác.');
       return;
     }
-    const filtered = zones.filter((z) => z !== activeZone);
-    setZones(filtered);
-    setActiveZone(filtered[0]);
+    const filtered = zoneProfiles.filter((_, idx) => idx !== activeZoneIdx);
+    setZoneProfiles(filtered);
+    setActiveZoneIdx(0);
   };
 
   const handleResetZones = () => {
-    setZones(['Khu vực 1']);
-    setActiveZone('Khu vực 1');
-    setLocation('Bắc Giang');
-    setCropName('Vải thiều');
-    setVariety('Thanh Hà');
+    setZoneProfiles([DEFAULT_ZONE]);
+    setActiveZoneIdx(0);
     setStatusNote('Đã đặt lại cấu hình khu vực canh tác mặc định.');
   };
 
@@ -139,17 +185,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setCoords(`${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E`);
+          updateCurrentZone({
+            coords: `${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E`,
+          });
           setStatusNote('Đã cập nhật tọa độ GPS thực tế.');
         },
         () => {
-          setCoords('21.2731° N, 106.1946° E (Bắc Giang)');
+          updateCurrentZone({ coords: DEFAULT_ZONE.coords });
           setStatusNote('Đã lấy tọa độ trạm mặc định tại Bắc Giang.');
         },
         { timeout: 4000 }
       );
     } else {
-      setCoords('21.2731° N, 106.1946° E (Bắc Giang)');
+      updateCurrentZone({ coords: DEFAULT_ZONE.coords });
       setStatusNote('Đã lấy tọa độ trạm mặc định tại Bắc Giang.');
     }
   };
@@ -166,10 +214,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     try {
       const doc = new jsPDF();
       doc.setFontSize(15);
-      doc.text(`BAO CAO QUAN TRAC M.S.TECH - TRAM ${deviceId}`, 14, 18);
+      doc.text(sanitizePdfText(`BAO CAO QUAN TRAC M.S.TECH - TRAM ${deviceId}`), 14, 18);
       doc.setFontSize(10);
       doc.text(
-        `Khu vuc: ${activeZone} | Tinh: ${location || 'Bac Giang'} | Cay trong: ${cropName || 'Vai thieu'} (${variety || 'Thanh Ha'})`,
+        sanitizePdfText(
+          `Khu vuc: ${activeZone} | Tinh: ${location || 'Bac Giang'} | Cay trong: ${cropName || 'Vai thieu'} (${variety || 'Thanh Ha'})`
+        ),
         14,
         26
       );
@@ -177,7 +227,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const rows = (historyData.length > 0 ? historyData.slice(-12) : data ? [data] : []).map(
         (item: any, idx: number) => [
           String(idx + 1),
-          item.timeStr || item.dateStr || new Date(item.timestamp || Date.now()).toLocaleString('vi-VN'),
+          sanitizePdfText(
+            String(
+              item.timeStr ||
+                item.dateStr ||
+                new Date(item.timestamp || Date.now()).toLocaleString('vi-VN')
+            )
+          ),
+          sanitizePdfText(String(item.zone || activeZone)),
           String(item.n ?? '--'),
           String(item.p ?? '--'),
           String(item.k ?? '--'),
@@ -188,8 +245,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       autoTable(doc, {
         startY: 32,
-        head: [['#', 'Thoi gian', 'N (mg/kg)', 'P (mg/kg)', 'K (mg/kg)', 'Do am dat (%)', 'Nhiet dat (C)']],
-        body: rows.length > 0 ? rows : [['1', 'Chua co du lieu', '--', '--', '--', '--', '--']],
+        head: [
+          [
+            '#',
+            'Thoi gian',
+            'Khu vuc',
+            'N (mg/kg)',
+            'P (mg/kg)',
+            'K (mg/kg)',
+            'Do am dat (%)',
+            'Nhiet dat (C)',
+          ],
+        ],
+        body:
+          rows.length > 0
+            ? rows
+            : [['1', 'Chua co du lieu', sanitizePdfText(activeZone), '--', '--', '--', '--', '--']],
       });
 
       doc.save(`BaoCao_MSTech_${deviceId}.pdf`);
@@ -254,13 +325,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             Chọn khu vực đang tác động
           </p>
           <div className="flex flex-wrap gap-2 items-center">
-            {zones.map((z) => {
-              const isSelected = z === activeZone;
+            {zoneProfiles.map((z, idx) => {
+              const isSelected = idx === activeZoneIdx;
               return (
                 <button
-                  key={z}
+                  key={z.id}
                   type="button"
-                  onClick={() => setActiveZone(z)}
+                  onClick={() => setActiveZoneIdx(idx)}
                   className={`flex items-center space-x-1.5 px-4 py-3 rounded-2xl text-sm font-bold border transition-all ${
                     isSelected
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm'
@@ -268,7 +339,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }`}
                 >
                   <Leaf className="w-4 h-4" />
-                  <span>{z}</span>
+                  <span>{z.name}</span>
                 </button>
               );
             })}
@@ -299,26 +370,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         <div className="mt-8 space-y-3">
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-3">
-            Thông tin canh tác
+            Thông tin canh tác ({activeZone})
           </p>
           <input
             type="text"
             value={location}
-            onChange={(e) => setLocation(e.target.value)}
+            onChange={(e) => updateCurrentZone({ location: e.target.value })}
             placeholder="Tỉnh/Thành phố (Vd: Bắc Giang)"
             className="w-full px-5 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-medium text-gray-800 transition-all"
           />
           <input
             type="text"
             value={cropName}
-            onChange={(e) => setCropName(e.target.value)}
+            onChange={(e) => updateCurrentZone({ cropName: e.target.value })}
             placeholder="Tên cây (Vd: Vải thiều)"
             className="w-full px-5 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-medium text-gray-800 transition-all"
           />
           <input
             type="text"
             value={variety}
-            onChange={(e) => setVariety(e.target.value)}
+            onChange={(e) => updateCurrentZone({ variety: e.target.value })}
             placeholder="Giống (Vd: Thanh Hà)"
             className="w-full px-5 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-medium text-gray-800 transition-all"
           />
@@ -430,11 +501,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <input
               type="text"
               value={activeZone}
-              onChange={(e) => {
-                const val = e.target.value;
-                setZones((prev) => prev.map((z) => (z === activeZone ? val : z)));
-                setActiveZone(val);
-              }}
+              onChange={(e) => updateCurrentZone({ name: e.target.value })}
               aria-label="Tên khu vực đang đo"
               className="w-full px-5 pr-16 py-4 rounded-2xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none text-sm font-medium text-gray-800 transition-all"
             />

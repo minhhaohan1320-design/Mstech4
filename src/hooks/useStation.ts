@@ -20,6 +20,13 @@ const DEMO_DATA: SensorData = {
   nhiet_do_dat: [27.8],
 };
 
+function formatDateAndTime(ts: number): { dateStr: string; timeStr: string } {
+  const d = new Date(ts);
+  const dateStr = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')} ${d.getDate()}/${d.getMonth() + 1}`;
+  return { dateStr, timeStr };
+}
+
 function createDemoHistory(): HistoryRecord[] {
   const now = Date.now();
   const samples = [
@@ -31,9 +38,7 @@ function createDemoHistory(): HistoryRecord[] {
 
   return samples.map((s, idx) => {
     const ts = now + s.offsetMin * 60 * 1000;
-    const d = new Date(ts);
-    const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')} ${d.getDate()}/${d.getMonth() + 1}`;
-    const dateStr = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const { dateStr, timeStr } = formatDateAndTime(ts);
     return {
       ...normalizeSensorData(s, ts),
       id: `demo-${idx + 1}`,
@@ -54,6 +59,8 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
   const [error, setError] = useState<string | null>(null);
 
   const commandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const graceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasExplicitStatusRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (isDemo) {
@@ -69,24 +76,48 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
     if (!cleanId) {
       setSensorData(null);
       setIsConnected(false);
+      setStatus({ online: false, lastSeen: 0 });
       return;
     }
+
+    hasExplicitStatusRef.current = false;
 
     const dataRef = ref(db, `/Stations/${cleanId}/Data`);
     const cmdRef = ref(db, `/Stations/${cleanId}/Command`);
     const statusRef = ref(db, `/Stations/${cleanId}/Status`);
     const historyRef = ref(db, `/Stations/${cleanId}/History`);
 
-    // 1. Lắng nghe dữ liệu cảm biến từ ESP32-S3
+    // 1. Lắng nghe dữ liệu cảm biến từ ESP32-S3 (/Stations/<ID>/Data)
     const unsubData = onValue(
       dataRef,
       (snapshot) => {
         setIsConnected(true);
         if (snapshot.exists()) {
           const raw = snapshot.val();
-          const normalized = normalizeSensorData(raw, Date.now());
+          const now = Date.now();
+          const normalized = normalizeSensorData(raw, now);
           setSensorData(normalized);
           setError(null);
+
+          // Khi nhận được gói Data mới từ ESP32, kết thúc trạng thái chờ đo
+          if (graceTimeoutRef.current) {
+            clearTimeout(graceTimeoutRef.current);
+            graceTimeoutRef.current = null;
+          }
+          if (commandTimeoutRef.current) {
+            clearTimeout(commandTimeoutRef.current);
+            commandTimeoutRef.current = null;
+          }
+          setIsCommanding(false);
+
+          // Firmware esp32_mstech_station.ino đẩy trực tiếp vào /Data (không có node /Status riêng)
+          if (!hasExplicitStatusRef.current) {
+            setStatus((prev) => ({
+              ...prev,
+              online: true,
+              lastSeen: normalized.timestamp || now,
+            }));
+          }
         }
       },
       (err) => {
@@ -96,25 +127,35 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       }
     );
 
-    // 2. Lắng nghe trạng thái cờ lệnh read_soil
+    // 2. Lắng nghe trạng thái cờ lệnh read_soil (/Stations/<ID>/Command)
     const unsubCmd = onValue(cmdRef, (snapshot) => {
       if (snapshot.exists()) {
         const cmd = snapshot.val();
         const isReading = Boolean(cmd.read_soil);
-        setIsCommanding(isReading);
 
-        if (!isReading && commandTimeoutRef.current) {
-          clearTimeout(commandTimeoutRef.current);
-          commandTimeoutRef.current = null;
+        if (isReading) {
+          setIsCommanding(true);
+        } else {
+          // ESP32 hạ cờ read_soil=false ngay khi bắt đầu chu kỳ đọc 3 lần (~1.5 giây)
+          // Giữ trạng thái đang đo thêm tối đa 1.8 giây hoặc cho tới khi /Data mới đổ về
+          if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
+          graceTimeoutRef.current = setTimeout(() => {
+            setIsCommanding(false);
+            if (commandTimeoutRef.current) {
+              clearTimeout(commandTimeoutRef.current);
+              commandTimeoutRef.current = null;
+            }
+          }, 1800);
         }
       } else {
         setIsCommanding(false);
       }
     });
 
-    // 3. Lắng nghe trạng thái Online / Heartbeat
+    // 3. Lắng nghe trạng thái Online / Heartbeat (nếu có node /Status)
     const unsubStatus = onValue(statusRef, (snapshot) => {
       if (snapshot.exists()) {
+        hasExplicitStatusRef.current = true;
         const st = snapshot.val();
         const lastSeen = typeof st.lastSeen === 'number' ? st.lastSeen : Date.now();
         const isRecent = Date.now() - lastSeen < 120000;
@@ -126,18 +167,21 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       }
     });
 
-    // 4. Lắng nghe lịch sử đo
+    // 4. Lắng nghe lịch sử đo (/Stations/<ID>/History)
     const unsubHistory = onValue(historyRef, (snapshot) => {
       if (snapshot.exists()) {
         const rawHist = snapshot.val();
         const list: HistoryRecord[] = Object.keys(rawHist).map((key) => {
-          const item = rawHist[key];
-          const time = new Date(item.timestamp || Date.now());
-          const timeStr = `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')} ${time.getDate()}/${time.getMonth() + 1}`;
+          const item = rawHist[key] || {};
+          const normalized = normalizeSensorData(item, item.timestamp || Date.now());
+          const { dateStr, timeStr } = formatDateAndTime(normalized.timestamp);
           return {
+            ...normalized,
             id: key,
-            ...item,
-            timeStr,
+            zone: item.zone || 'Khu vực 1',
+            cropName: item.cropName || 'Vải thiều',
+            dateStr: item.dateStr || dateStr,
+            timeStr: item.timeStr || timeStr,
           };
         });
         list.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -153,6 +197,7 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       unsubStatus();
       unsubHistory();
       if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
+      if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
     };
   }, [deviceId, isDemo]);
 
@@ -174,9 +219,7 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           now
         );
         setSensorData(updated);
-        const d = new Date(now);
-        const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')} ${d.getDate()}/${d.getMonth() + 1}`;
-        const dateStr = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const { dateStr, timeStr } = formatDateAndTime(now);
         setHistory((prev) => [
           ...prev,
           {
@@ -242,17 +285,16 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
   const saveToHistory = useCallback(
     async (zone?: string, cropName?: string) => {
       if (!sensorData) return false;
-      const now = new Date();
-      const dateStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')} ${now.getDate()}/${now.getMonth() + 1}`;
+      const nowTs = Date.now();
+      const { dateStr, timeStr } = formatDateAndTime(nowTs);
 
       if (isDemo) {
         setHistory((prev) => [
           ...prev,
           {
             ...sensorData,
-            id: `demo-${Date.now()}`,
-            timestamp: Date.now(),
+            id: `demo-${nowTs}`,
+            timestamp: nowTs,
             zone: zone || 'Khu vực 1',
             cropName: cropName || 'Vải thiều',
             dateStr,
@@ -273,10 +315,11 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           k: sensorData.k,
           moisture: sensorData.moisture,
           soilTemp: sensorData.soilTemp,
-          timestamp: sensorData.timestamp || Date.now(),
+          timestamp: sensorData.timestamp || nowTs,
           zone: zone || 'Khu vực 1',
           cropName: cropName || 'Cây trồng',
           dateStr,
+          timeStr,
         });
         return true;
       } catch (err: any) {

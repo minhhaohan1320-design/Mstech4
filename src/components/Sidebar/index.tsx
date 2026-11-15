@@ -62,6 +62,8 @@ const NavItem = ({ id, icon, label, activeTab, setActiveTab }: { id: string, ico
   const active = activeTab === id;
   return (
     <button
+      type="button"
+      aria-current={active ? 'page' : undefined}
       onClick={() => setActiveTab(id)}
       className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-semibold text-sm ${
         active 
