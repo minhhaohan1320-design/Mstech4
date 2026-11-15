@@ -42,8 +42,6 @@ export function normalizeSensorData(raw: Record<string, any> | null | undefined,
   const k = safeNum(raw?.k, 0);
   const moisture = safeNum(raw?.moisture, 0);
   const soilTemp = safeNum(raw?.soilTemp, 0);
-  const waterTemp = safeNum(raw?.waterTemp, 0);
-  const ph = safeNum(raw?.ph, 0);
   const timestamp = typeof raw?.timestamp === 'number' && Number.isFinite(raw.timestamp) ? raw.timestamp : fallbackTimestamp;
 
   return {
@@ -52,19 +50,15 @@ export function normalizeSensorData(raw: Record<string, any> | null | undefined,
     k,
     moisture,
     soilTemp,
-    waterTemp,
-    ph,
     timestamp,
     npk_data: { n: [n], p: [p], k: [k] },
     do_am_dat: [moisture],
     nhiet_do_dat: [soilTemp],
-    ph_data: [ph],
-    temp_nuoc: waterTemp,
   };
 }
 
 /**
- * Đánh giá nông học chuẩn xác dựa trên thông số cảm biến thực tế
+ * Đánh giá nông học chuẩn xác dựa trên thông số cảm biến đất thực tế
  */
 export function evaluateAgriculturalInsight(params: {
   cropType?: string;
@@ -74,8 +68,6 @@ export function evaluateAgriculturalInsight(params: {
   k?: number | null;
   moisture?: number | null;
   soilTemp?: number | null;
-  ph?: number | null;
-  waterTemp?: number | null;
 }): AIInsight {
   const crop = params.cropType?.trim() || 'Cây trồng';
   const loc = params.location?.trim() || 'Bắc Giang';
@@ -84,8 +76,6 @@ export function evaluateAgriculturalInsight(params: {
   const k = params.k;
   const moisture = params.moisture;
   const soilTemp = params.soilTemp;
-  const ph = params.ph;
-  const waterTemp = params.waterTemp;
 
   const anomalies: string[] = [];
   const trends: string[] = [];
@@ -144,7 +134,7 @@ export function evaluateAgriculturalInsight(params: {
   let moistureComment = 'Chưa có dữ liệu độ ẩm đất';
   if (typeof moisture === 'number' && !isNaN(moisture)) {
     if (moisture < 35) {
-      moistureComment = `${moisture}% (Đất khô - Cần tưới nước)`;
+      moistureComment = `${moisture}% (Đất khô - Cần tưới ẩm)`;
       anomalies.push(`Độ ẩm đất (${moisture}%) xuống thấp, cây khó hấp thu NPK.`);
       recommendations.push('Kích hoạt hệ thống tưới nhỏ giọt để nâng độ ẩm đất lên mức 45% - 65%.');
     } else if (moisture <= 75) {
@@ -157,38 +147,23 @@ export function evaluateAgriculturalInsight(params: {
     }
   }
 
-  // Đánh giá pH
-  let phComment = 'Chưa có dữ liệu độ pH';
-  if (typeof ph === 'number' && !isNaN(ph)) {
-    if (ph < 5.5) {
-      phComment = `${ph} (Đất chua / Axit)`;
-      anomalies.push(`Độ pH (${ph}) thấp (chua), làm giảm hiệu suất hấp thu NPK.`);
-      recommendations.push('Bón vôi nông nghiệp (CaCO3) hoặc Dolomite để nâng pH lên ngưỡng 6.0 - 6.8.');
-    } else if (ph <= 7.2) {
-      phComment = `${ph} (Trung tính - Tối ưu)`;
-      trends.push(`Độ pH (${ph}) nằm trong khoảng tối ưu cho ${crop} tại ${loc}.`);
-    } else {
-      phComment = `${ph} (Kiềm nhẹ)`;
-      recommendations.push('Bổ sung phân hữu cơ hoai mục để ổn định đệm pH đất.');
-    }
-  }
-
-  // Đánh giá nhiệt độ đất & nước
-  const tempParts: string[] = [];
+  // Đánh giá nhiệt độ đất
+  let temperatureComment = 'Chưa có dữ liệu nhiệt độ đất';
   if (typeof soilTemp === 'number' && !isNaN(soilTemp)) {
-    tempParts.push(`Đất: ${soilTemp}°C`);
+    temperatureComment = `${soilTemp}°C (Nhiệt độ đất)`;
     if (soilTemp > 35) {
-      anomalies.push(`Nhiệt độ đất (${soilTemp}°C) cao, gây стресс nhiệt cho rễ.`);
+      anomalies.push(`Nhiệt độ đất (${soilTemp}°C) cao, gây sốc nhiệt cho rễ.`);
       recommendations.push('Tủ gốc bằng rơm rạ hoặc cỏ khô để giữ ẩm và hạ nhiệt độ mặt đất.');
+    } else if (soilTemp < 15) {
+      anomalies.push(`Nhiệt độ đất (${soilTemp}°C) thấp, rễ hấp thu dinh dưỡng chậm.`);
+      recommendations.push('Giữ ấm gốc và hạn chế tưới vào sáng sớm hoặc chiều muộn.');
+    } else {
+      trends.push(`Nhiệt độ đất (${soilTemp}°C) ổn định cho hoạt động của hệ rễ.`);
     }
   }
-  if (typeof waterTemp === 'number' && !isNaN(waterTemp)) {
-    tempParts.push(`Nước: ${waterTemp}°C`);
-  }
-  const temperatureComment = tempParts.length > 0 ? tempParts.join(' | ') : 'Chưa có dữ liệu nhiệt độ';
 
   if (trends.length === 0) {
-    trends.push(`Các chỉ số môi trường tại ${loc} đang được giám sát theo chu kỳ thời gian thực.`);
+    trends.push(`Các chỉ số môi trường đất tại ${loc} đang được giám sát theo chu kỳ thời gian thực.`);
   }
   if (recommendations.length === 0) {
     recommendations.push(`Duy trì chế độ chăm sóc hiện tại cho ${crop} và theo dõi định kỳ qua trạm M.S.Tech.`);
@@ -196,8 +171,8 @@ export function evaluateAgriculturalInsight(params: {
 
   const summary =
     anomalies.length === 0
-      ? `Trạm quan trắc tại ${loc} ghi nhận các chỉ số đất và nước dành cho ${crop} đang ở trạng thái cân bằng, thuận lợi cho sinh trưởng.`
-      : `Trạm quan trắc tại ${loc} phát hiện ${anomalies.length} chỉ số cần lưu ý đối với ${crop}. Cần điều chỉnh dinh dưỡng và độ ẩm theo khuyến nghị bên dưới.`;
+      ? `Trạm quan trắc tại ${loc} ghi nhận các chỉ số đất (N-P-K, độ ẩm đất, nhiệt độ đất) dành cho ${crop} đang ở trạng thái cân bằng, thuận lợi cho sinh trưởng.`
+      : `Trạm quan trắc tại ${loc} phát hiện ${anomalies.length} chỉ số đất cần lưu ý đối với ${crop}. Cần điều chỉnh dinh dưỡng và độ ẩm đất theo khuyến nghị bên dưới.`;
 
   return {
     summary,
@@ -207,7 +182,6 @@ export function evaluateAgriculturalInsight(params: {
       k: kComment,
     },
     moisture: moistureComment,
-    ph: phComment,
     temperature: temperatureComment,
     anomalies,
     trends,
@@ -216,12 +190,12 @@ export function evaluateAgriculturalInsight(params: {
 }
 
 /**
- * Tạo câu trả lời tư vấn nông nghiệp dựa trên dữ liệu cảm biến thực tế
+ * Tạo câu trả lời tư vấn nông nghiệp dựa trên dữ liệu cảm biến đất thực tế
  */
 export function generateChatReply(userMessage: string, sensorData?: Partial<SensorData> | null): string {
   const msg = (userMessage || '').trim();
   if (!sensorData) {
-    return `Hiện tại trạm chưa có dữ liệu cảm biến. Đối với câu hỏi **"${msg}"**, bạn vui lòng kết nối trạm hoặc bấm **ĐO ĐẤT / ĐO NƯỚC** trên bảng điều khiển để M.S.AI phân tích chính xác nhất.`;
+    return `Hiện tại trạm chưa có dữ liệu cảm biến. Đối với câu hỏi **"${msg}"**, bạn vui lòng kết nối trạm hoặc bấm **ĐO ĐẤT** trên bảng điều khiển để M.S.AI phân tích chính xác nhất.`;
   }
 
   const insight = evaluateAgriculturalInsight({
@@ -232,15 +206,12 @@ export function generateChatReply(userMessage: string, sensorData?: Partial<Sens
     k: sensorData.k,
     moisture: sensorData.moisture,
     soilTemp: sensorData.soilTemp,
-    ph: sensorData.ph,
-    waterTemp: sensorData.waterTemp,
   });
 
   const recs = insight.recommendations.map((r) => `- ${r}`).join('\n');
-  return `Dựa trên dữ liệu cảm biến thời gian thực từ trạm **M.S.Tech**:\n\n` +
+  return `Dựa trên dữ liệu cảm biến đất thời gian thực từ trạm **M.S.Tech**:\n\n` +
     `- **NPK:** N = ${sensorData.n ?? 'Chưa có'} mg/kg | P = ${sensorData.p ?? 'Chưa có'} mg/kg | K = ${sensorData.k ?? 'Chưa có'} mg/kg\n` +
-    `- **Độ ẩm đất:** ${sensorData.moisture ?? 'Chưa có'}% | **Nhiệt độ đất:** ${sensorData.soilTemp ?? 'Chưa có'}°C\n` +
-    `- **Độ pH:** ${sensorData.ph ?? 'Chưa có'} | **Nhiệt độ nước:** ${sensorData.waterTemp ?? 'Chưa có'}°C\n\n` +
+    `- **Độ ẩm đất:** ${sensorData.moisture ?? 'Chưa có'}% | **Nhiệt độ đất:** ${sensorData.soilTemp ?? 'Chưa có'}°C\n\n` +
     `**Nhận định cho câu hỏi "${msg}":**\n${insight.summary}\n\n` +
     `**Khuyến nghị kỹ thuật:**\n${recs}`;
 }

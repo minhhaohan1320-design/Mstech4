@@ -10,7 +10,7 @@ interface HistoryChartProps {
 }
 
 export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCard }) => {
-  const [metric, setMetric] = useState<'npk' | 'moisture' | 'soilTemp' | 'ph'>('npk');
+  const [metric, setMetric] = useState<'npk' | 'moisture' | 'soilTemp'>('npk');
 
   if (!historyData || historyData.length === 0) {
     if (hideCard) return null;
@@ -65,7 +65,7 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
               <XAxis dataKey="timeStr" tick={{fontSize: 10}} axisLine={false} tickLine={false} />
               <YAxis tick={{fontSize: 10}} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
               <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-              <Area type="monotone" dataKey="moisture" name="Độ ẩm (%)" stroke="#0ea5e9" fillOpacity={1} fill="url(#colorMoisture)" />
+              <Area type="monotone" dataKey="moisture" name="Độ ẩm đất (%)" stroke="#0ea5e9" fillOpacity={1} fill="url(#colorMoisture)" />
             </AreaChart>
           </ResponsiveContainer>
         );
@@ -84,24 +84,6 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
               <YAxis tick={{fontSize: 10}} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
               <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
               <Area type="monotone" dataKey="soilTemp" name="Nhiệt độ đất (°C)" stroke="#ef4444" fillOpacity={1} fill="url(#colorTemp)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        );
-      case 'ph':
-        return (
-           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={historyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorPh" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="timeStr" tick={{fontSize: 10}} axisLine={false} tickLine={false} />
-              <YAxis tick={{fontSize: 10}} axisLine={false} tickLine={false} domain={[0, 14]} />
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-              <Area type="monotone" dataKey="ph" name="Độ pH" stroke="#10b981" fillOpacity={1} fill="url(#colorPh)" />
             </AreaChart>
           </ResponsiveContainer>
         );
@@ -135,9 +117,8 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
           className="bg-gray-50 border border-gray-200 text-gray-700 text-xs rounded-xl focus:ring-emerald-500 focus:border-emerald-500 block px-3 py-2 font-bold outline-none uppercase tracking-wider"
         >
           <option value="npk">N-P-K</option>
-          <option value="moisture">Độ ẩm</option>
+          <option value="moisture">Độ ẩm đất</option>
           <option value="soilTemp">Nhiệt độ đất</option>
-          <option value="ph">Độ pH</option>
         </select>
       </div>
 

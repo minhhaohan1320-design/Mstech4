@@ -75,7 +75,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   historyData = [],
 }) => {
   const [isMeasuring, setIsMeasuring] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dat' | 'nuoc'>('dat');
 
   // Tầng 1: Quản lý Khu vực & Thông tin canh tác
   const [zones, setZones] = useState<string[]>(['Khu vực 1']);
@@ -127,14 +126,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setStatusNote('Đã đặt lại cấu hình khu vực canh tác mặc định.');
   };
 
-  const handleMeasure = (targetTab?: 'dat' | 'nuoc') => {
-    if (targetTab) {
-      setActiveTab(targetTab);
-    }
+  const handleMeasure = () => {
     setStatusNote(
       isDemo
-        ? 'Đang lấy mẫu cảm biến (Chế độ mô phỏng M.S.Tech)...'
-        : 'Đã gửi lệnh đọc cảm biến xuống trạm ESP32-S3...'
+        ? 'Đang lấy mẫu cảm biến đất (Chế độ mô phỏng M.S.Tech)...'
+        : 'Đã gửi lệnh đọc cảm biến đất xuống trạm ESP32-S3...'
     );
     onMeasure();
   };
@@ -187,15 +183,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           String(item.k ?? '--'),
           String(item.moisture ?? '--'),
           String(item.soilTemp ?? '--'),
-          String(item.ph ?? '--'),
-          String(item.waterTemp ?? '--'),
         ]
       );
 
       autoTable(doc, {
         startY: 32,
-        head: [['#', 'Thoi gian', 'N (mg/kg)', 'P (mg/kg)', 'K (mg/kg)', 'Do am (%)', 'Nhiet dat (C)', 'pH', 'Nhiet nuoc (C)']],
-        body: rows.length > 0 ? rows : [['1', 'Chua co du lieu', '--', '--', '--', '--', '--', '--', '--']],
+        head: [['#', 'Thoi gian', 'N (mg/kg)', 'P (mg/kg)', 'K (mg/kg)', 'Do am dat (%)', 'Nhiet dat (C)']],
+        body: rows.length > 0 ? rows : [['1', 'Chua co du lieu', '--', '--', '--', '--', '--']],
       });
 
       doc.save(`BaoCao_MSTech_${deviceId}.pdf`);
@@ -331,8 +325,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* TẦNG 2: NHẬP LIỆU ĐẤT & NƯỚC */}
-      <LayerHeader num={2} title="TẦNG 2: NHẬP LIỆU ĐẤT & NƯỚC" />
+      {/* TẦNG 2: NHẬP LIỆU & ĐO CHỈ SỐ ĐẤT */}
+      <LayerHeader num={2} title="TẦNG 2: NHẬP LIỆU & ĐO CHỈ SỐ ĐẤT" />
       <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100">
         <div className="flex flex-col items-center justify-center mb-8">
           <div className="w-24 h-24 mb-3">
@@ -340,88 +334,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest">Salamander</p>
           <p className="text-[10px] font-bold text-gray-400 mt-2 text-center uppercase tracking-widest leading-relaxed">
-            Đang ghi chép chỉ số ({lastUpdated ? `Cập nhật: ${lastUpdated}` : 'Thời gian thực'})
+            Đang ghi chép chỉ số đất ({lastUpdated ? `Cập nhật: ${lastUpdated}` : 'Thời gian thực'})
           </p>
         </div>
 
-        <div className="flex bg-gray-50 p-1.5 rounded-2xl mb-8 border border-gray-100">
-          <button
-            type="button"
-            onClick={() => setActiveTab('dat')}
-            className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${
-              activeTab === 'dat'
-                ? 'bg-white shadow-sm text-emerald-700 border border-gray-100'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Đất
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('nuoc')}
-            className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${
-              activeTab === 'nuoc'
-                ? 'bg-white shadow-sm text-emerald-700 border border-gray-100'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            Nước
-          </button>
-        </div>
-
-        {activeTab === 'dat' ? (
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <MinimalSensorCard title="ĐẠM (N)" value={data?.n} unit="mg/kg" icon="N" labelColor="text-blue-600" />
-            <MinimalSensorCard title="LÂN (P)" value={data?.p} unit="mg/kg" icon="P" labelColor="text-orange-500" />
-            <MinimalSensorCard title="KALI (K)" value={data?.k} unit="mg/kg" icon="K" labelColor="text-purple-600" />
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <MinimalSensorCard title="ĐẠM (N)" value={data?.n} unit="mg/kg" icon="N" labelColor="text-blue-600" />
+          <MinimalSensorCard title="LÂN (P)" value={data?.p} unit="mg/kg" icon="P" labelColor="text-orange-500" />
+          <MinimalSensorCard title="KALI (K)" value={data?.k} unit="mg/kg" icon="K" labelColor="text-purple-600" />
+          <MinimalSensorCard
+            title="ĐỘ ẨM ĐẤT"
+            value={data?.moisture}
+            unit="%"
+            icon={<Droplets className="w-5 h-5" />}
+            labelColor="text-blue-400"
+          />
+          <div className="col-span-2">
             <MinimalSensorCard
-              title="ĐỘ ẨM"
-              value={data?.moisture}
-              unit="%"
-              icon={<Droplets className="w-5 h-5" />}
-              labelColor="text-blue-400"
-            />
-            <div className="col-span-2">
-              <MinimalSensorCard
-                title="NHIỆT ĐỘ ĐẤT"
-                value={data?.soilTemp}
-                unit="°C"
-                icon={<Thermometer className="w-5 h-5" />}
-                labelColor="text-orange-500"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 mb-6">
-            <MinimalSensorCard
-              title="NHIỆT ĐỘ NƯỚC"
-              value={data?.waterTemp}
+              title="NHIỆT ĐỘ ĐẤT"
+              value={data?.soilTemp}
               unit="°C"
               icon={<Thermometer className="w-5 h-5" />}
-              labelColor="text-blue-500"
+              labelColor="text-orange-500"
             />
-            <MinimalSensorCard title="ĐỘ pH" value={data?.ph} unit="" icon="pH" labelColor="text-emerald-500" />
           </div>
-        )}
+        </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="mb-4">
           <button
             type="button"
-            onClick={() => handleMeasure('dat')}
+            onClick={handleMeasure}
             disabled={isMeasuring}
-            className="bg-[#FF8C00] hover:bg-[#e67e00] text-white font-bold py-4 rounded-2xl flex items-center justify-center shadow-md shadow-orange-200 transition-colors disabled:opacity-50"
+            className="w-full bg-[#FF8C00] hover:bg-[#e67e00] text-white font-bold py-4 rounded-2xl flex items-center justify-center shadow-md shadow-orange-200 transition-colors disabled:opacity-50"
           >
             <RefreshCcw className={`w-5 h-5 mr-2 ${isMeasuring ? 'animate-spin' : ''}`} />
             ĐO ĐẤT
-          </button>
-          <button
-            type="button"
-            onClick={() => handleMeasure('nuoc')}
-            disabled={isMeasuring}
-            className="bg-[#1E90FF] hover:bg-[#1c86ee] text-white font-bold py-4 rounded-2xl flex items-center justify-center shadow-md shadow-blue-200 transition-colors disabled:opacity-50"
-          >
-            <RefreshCcw className={`w-5 h-5 mr-2 ${isMeasuring ? 'animate-spin' : ''}`} />
-            ĐO NƯỚC
           </button>
         </div>
 

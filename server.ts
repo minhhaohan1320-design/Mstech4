@@ -99,8 +99,8 @@ async function startServer() {
         const summaryText =
           `### Kết quả phân tích tài liệu: ${fileName || "Báo cáo nông nghiệp.pdf"} (${sizeKb} KB)\n\n` +
           `- **Tóm tắt nội dung:** Tài liệu đã được hệ thống M.S.Tech tiếp nhận và đối chiếu với quy chuẩn canh tác nông nghiệp tại Bắc Giang.\n` +
-          `- **Chỉ tiêu khuyến nghị:** Duy trì độ pH đất trong ngưỡng **6.0 – 6.8**, độ ẩm đất **45% – 65%**, và cân đối tỷ lệ **N-P-K** theo từng giai đoạn sinh trưởng.\n` +
-          `- **Hành động đề xuất:** Lưu trữ báo cáo định kỳ 12 tháng và kết hợp số liệu đo thực tế từ trạm ESP32-S3 để tối ưu lịch tưới và bón phân.`;
+          `- **Chỉ tiêu khuyến nghị:** Duy trì độ ẩm đất **45% – 65%**, nhiệt độ đất ổn định **20°C – 32°C**, và cân đối tỷ lệ **N-P-K** theo từng giai đoạn sinh trưởng.\n` +
+          `- **Hành động đề xuất:** Lưu trữ báo cáo định kỳ 12 tháng và kết hợp số liệu đo đất thực tế từ trạm ESP32-S3 để tối ưu lịch tưới và bón phân.`;
         return res.json({ result: summaryText });
       }
     } catch (error: any) {
@@ -112,23 +112,21 @@ async function startServer() {
   // API Route for AI Analysis (Structured JSON Output)
   app.post("/api/analyze", async (req, res) => {
     try {
-      const { cropType, location, n, p, k, moisture, soilTemp, ph, waterTemp } = req.body;
+      const { cropType, location, n, p, k, moisture, soilTemp } = req.body;
 
       try {
         const prompt = `Bạn là một chuyên gia nông nghiệp thông minh. 
-Dữ liệu cảm biến đo được từ trạm quan trắc nông nghiệp tại khu vực ${location || "Bắc Giang"} như sau:
+Dữ liệu cảm biến đất đo được từ trạm quan trắc nông nghiệp tại khu vực ${location || "Bắc Giang"} như sau:
 - Giống cây: ${cropType || "Chưa rõ"}
 - Nitơ (N): ${n ?? "Chưa có"} mg/kg
 - Phốt pho (P): ${p ?? "Chưa có"} mg/kg
 - Kali (K): ${k ?? "Chưa có"} mg/kg
 - Độ ẩm đất: ${moisture ?? "Chưa có"} %
 - Nhiệt độ đất: ${soilTemp ?? "Chưa có"} °C
-- Độ pH: ${ph ?? "Chưa có"}
-- Nhiệt độ nước: ${waterTemp ?? "Chưa có"} °C
 
 Nếu thiếu dữ liệu nào (null/undefined), hãy ghi rõ là "Chưa có dữ liệu [tên thông số]".
 Tuyệt đối KHÔNG tự tạo dữ liệu bịa đặt.
-Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
+Phân tích tình trạng đất hiện tại và đưa ra lời khuyên.`;
 
         const response = await generateWithFallback({
           contents: prompt,
@@ -139,7 +137,7 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
             responseSchema: {
               type: Type.OBJECT,
               properties: {
-                summary: { type: Type.STRING, description: "Đánh giá tổng quan về tình trạng." },
+                summary: { type: Type.STRING, description: "Đánh giá tổng quan về tình trạng đất." },
                 nutrients: {
                   type: Type.OBJECT,
                   properties: {
@@ -148,9 +146,8 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
                     k: { type: Type.STRING, description: "Nhận xét về Kali." },
                   },
                 },
-                moisture: { type: Type.STRING, description: "Nhận xét về độ ẩm." },
-                ph: { type: Type.STRING, description: "Nhận xét về pH." },
-                temperature: { type: Type.STRING, description: "Nhận xét về nhiệt độ đất và nước." },
+                moisture: { type: Type.STRING, description: "Nhận xét về độ ẩm đất." },
+                temperature: { type: Type.STRING, description: "Nhận xét về nhiệt độ đất." },
                 anomalies: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING },
@@ -171,7 +168,6 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
                 "summary",
                 "nutrients",
                 "moisture",
-                "ph",
                 "temperature",
                 "anomalies",
                 "trends",
@@ -195,8 +191,6 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
           k,
           moisture,
           soilTemp,
-          ph,
-          waterTemp,
         });
         return res.json(fallbackInsight);
       }
@@ -209,8 +203,6 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
         k,
         moisture,
         soilTemp,
-        ph,
-        waterTemp,
       });
       return res.json(fallbackInsight);
     } catch (error: any) {
@@ -230,21 +222,17 @@ Phân tích tình trạng hiện tại và đưa ra lời khuyên.`;
         const k = sensorData?.k;
         const moisture = sensorData?.moisture;
         const soilTemp = sensorData?.soilTemp;
-        const ph = sensorData?.ph;
-        const waterTemp = sensorData?.waterTemp;
 
         const dataContext = sensorData
           ? `
-Dữ liệu cảm biến hiện tại:
+Dữ liệu cảm biến đất hiện tại:
 - N: ${n ?? "Chưa có"} mg/kg
 - P: ${p ?? "Chưa có"} mg/kg
 - K: ${k ?? "Chưa có"} mg/kg
-- Độ ẩm: ${moisture ?? "Chưa có"} %
+- Độ ẩm đất: ${moisture ?? "Chưa có"} %
 - Nhiệt độ đất: ${soilTemp ?? "Chưa có"} °C
-- pH: ${ph ?? "Chưa có"}
-- Nhiệt độ nước: ${waterTemp ?? "Chưa có"} °C
 `
-          : "Hiện tại chưa có dữ liệu cảm biến.";
+          : "Hiện tại chưa có dữ liệu cảm biến đất.";
 
         const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh. 
 Người dùng hỏi: "${userMessage}". 

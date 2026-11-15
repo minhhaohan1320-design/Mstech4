@@ -24,8 +24,6 @@ export async function requestAIAnalysis(params: {
         k: params.data.k,
         moisture: params.data.moisture,
         soilTemp: params.data.soilTemp,
-        ph: params.data.ph,
-        waterTemp: params.data.waterTemp,
       }),
     });
 
@@ -47,8 +45,6 @@ export async function requestAIAnalysis(params: {
     k: params.data.k,
     moisture: params.data.moisture,
     soilTemp: params.data.soilTemp,
-    ph: params.data.ph,
-    waterTemp: params.data.waterTemp,
   });
 }
 

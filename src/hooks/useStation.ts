@@ -14,23 +14,19 @@ const DEMO_DATA: SensorData = {
   k: 35,
   moisture: 42.5,
   soilTemp: 27.8,
-  waterTemp: 25.4,
-  ph: 6.8,
   timestamp: Date.now(),
   npk_data: { n: [15], p: [20], k: [35] },
   do_am_dat: [42.5],
   nhiet_do_dat: [27.8],
-  ph_data: [6.8],
-  temp_nuoc: 25.4,
 };
 
 function createDemoHistory(): HistoryRecord[] {
   const now = Date.now();
   const samples = [
-    { offsetMin: -180, n: 14, p: 18, k: 32, moisture: 40.2, soilTemp: 26.5, waterTemp: 24.8, ph: 6.6 },
-    { offsetMin: -120, n: 15, p: 19, k: 34, moisture: 41.8, soilTemp: 27.1, waterTemp: 25.0, ph: 6.7 },
-    { offsetMin: -60, n: 16, p: 21, k: 36, moisture: 43.0, soilTemp: 27.5, waterTemp: 25.2, ph: 6.8 },
-    { offsetMin: 0, n: 15, p: 20, k: 35, moisture: 42.5, soilTemp: 27.8, waterTemp: 25.4, ph: 6.8 },
+    { offsetMin: -180, n: 14, p: 18, k: 32, moisture: 40.2, soilTemp: 26.5 },
+    { offsetMin: -120, n: 15, p: 19, k: 34, moisture: 41.8, soilTemp: 27.1 },
+    { offsetMin: -60, n: 16, p: 21, k: 36, moisture: 43.0, soilTemp: 27.5 },
+    { offsetMin: 0, n: 15, p: 20, k: 35, moisture: 42.5, soilTemp: 27.8 },
   ];
 
   return samples.map((s, idx) => {
@@ -173,8 +169,6 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
             k: Math.round(32 + Math.random() * 8),
             moisture: Number((40 + Math.random() * 6).toFixed(1)),
             soilTemp: Number((26.5 + Math.random() * 2.5).toFixed(1)),
-            waterTemp: Number((24.5 + Math.random() * 2).toFixed(1)),
-            ph: Number((6.4 + Math.random() * 0.6).toFixed(1)),
             timestamp: now,
           },
           now
@@ -279,8 +273,6 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           k: sensorData.k,
           moisture: sensorData.moisture,
           soilTemp: sensorData.soilTemp,
-          waterTemp: sensorData.waterTemp,
-          ph: sensorData.ph,
           timestamp: sensorData.timestamp || Date.now(),
           zone: zone || 'Khu vực 1',
           cropName: cropName || 'Cây trồng',

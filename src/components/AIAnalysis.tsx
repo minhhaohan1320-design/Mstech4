@@ -125,15 +125,11 @@ export const AIAnalysis: React.FC<AIAnalysisProps> = ({
               <p className="text-sm font-bold text-gray-800">{analysis.nutrients.k}</p>
             </div>
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-              <h4 className="font-bold text-blue-400 mb-1 text-[10px] uppercase tracking-widest">Độ ẩm</h4>
+              <h4 className="font-bold text-blue-400 mb-1 text-[10px] uppercase tracking-widest">Độ ẩm đất</h4>
               <p className="text-sm font-bold text-gray-800">{analysis.moisture}</p>
             </div>
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-              <h4 className="font-bold text-emerald-600 mb-1 text-[10px] uppercase tracking-widest">Độ pH</h4>
-              <p className="text-sm font-bold text-gray-800">{analysis.ph}</p>
-            </div>
-            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-              <h4 className="font-bold text-orange-400 mb-1 text-[10px] uppercase tracking-widest">Nhiệt độ</h4>
+            <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 col-span-2">
+              <h4 className="font-bold text-orange-400 mb-1 text-[10px] uppercase tracking-widest">Nhiệt độ đất</h4>
               <p className="text-sm font-bold text-gray-800">{analysis.temperature}</p>
             </div>
           </div>

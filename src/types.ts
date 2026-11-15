@@ -10,8 +10,6 @@ export interface SensorData {
   k: number;
   moisture: number;
   soilTemp: number;
-  waterTemp: number;
-  ph: number;
   timestamp: number;
 
   // Trường tương thích ngược cho các thành phần giao diện dùng mảng
@@ -22,8 +20,6 @@ export interface SensorData {
   };
   do_am_dat?: number[];
   nhiet_do_dat?: number[];
-  ph_data?: number[];
-  temp_nuoc?: number;
 }
 
 export interface StationCommand {
@@ -63,7 +59,6 @@ export interface AIInsight {
     k: string;
   };
   moisture: string;
-  ph: string;
   temperature: string;
   anomalies: string[];
   trends: string[];
