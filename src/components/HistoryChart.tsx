@@ -2,17 +2,38 @@ import React, { useState, useMemo } from 'react';
 import { HistoryRecord } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ChibiMarine } from './ChibiMarine';
-import { Filter } from 'lucide-react';
-import { calculateHistoryStats } from '../utils/stationLogic';
+import { Filter, Download, Trash2 } from 'lucide-react';
+import {
+  calculateHistoryStats,
+  filterHistoryByRange,
+  buildHistoryCsv,
+  HistoryRangeKey,
+} from '../utils/stationLogic';
 
 interface HistoryChartProps {
   historyData: HistoryRecord[];
   hideCard?: boolean;
+  deviceId?: string;
+  onDeleteRecord?: (recordId: string) => Promise<boolean>;
 }
 
-export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCard }) => {
+const RANGE_OPTIONS: Array<{ key: HistoryRangeKey; label: string }> = [
+  { key: '24h', label: '24 giờ' },
+  { key: '7d', label: '7 ngày' },
+  { key: '30d', label: '30 ngày' },
+  { key: 'all', label: 'Tất cả' },
+];
+
+export const HistoryChart: React.FC<HistoryChartProps> = ({
+  historyData,
+  hideCard,
+  deviceId = 'MSTECH',
+  onDeleteRecord,
+}) => {
   const [metric, setMetric] = useState<'npk' | 'moisture' | 'soilTemp'>('npk');
   const [selectedZone, setSelectedZone] = useState<string>('ALL');
+  const [selectedRange, setSelectedRange] = useState<HistoryRangeKey>('all');
+  const [exportNote, setExportNote] = useState<string | null>(null);
 
   const zones = useMemo(() => {
     const set = new Set<string>();
@@ -24,11 +45,27 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
 
   const filteredData = useMemo(() => {
     if (!historyData) return [];
-    if (selectedZone === 'ALL') return historyData;
-    return historyData.filter((item) => (item.zone || 'Khu vực 1') === selectedZone);
-  }, [historyData, selectedZone]);
+    const byRange = filterHistoryByRange(historyData, selectedRange);
+    if (selectedZone === 'ALL') return byRange;
+    return byRange.filter((item) => (item.zone || 'Khu vực 1') === selectedZone);
+  }, [historyData, selectedZone, selectedRange]);
 
   const stats = useMemo(() => calculateHistoryStats(filteredData), [filteredData]);
+
+  const handleExportCsv = () => {
+    if (filteredData.length === 0) return;
+    const csvContent = buildHistoryCsv(filteredData);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `LichSu_MSTech_${deviceId}_${selectedRange}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setExportNote(`Đã xuất ${filteredData.length} bản ghi ra file Excel/CSV.`);
+  };
 
   if (!historyData || historyData.length === 0) {
     if (hideCard) return null;
@@ -40,6 +77,14 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
   }
 
   const renderChart = () => {
+    if (filteredData.length === 0) {
+      return (
+        <div className="h-[220px] flex items-center justify-center bg-gray-50 rounded-2xl border border-gray-100 text-xs font-medium text-gray-400">
+          Không có bản ghi nào trong khoảng thời gian đã chọn.
+        </div>
+      );
+    }
+
     switch (metric) {
       case 'npk':
         return (
@@ -145,14 +190,49 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
   const content = (
     <>
       {!hideCard && (
-        <div className="flex items-center space-x-3 mb-6">
-          <div className="w-12 h-12 shrink-0">
-            <ChibiMarine chapter="imperialFist" bgColor="bg-yellow-50" borderColor="border-yellow-200" />
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div className="flex items-center space-x-3">
+            <div className="w-12 h-12 shrink-0">
+              <ChibiMarine chapter="imperialFist" bgColor="bg-yellow-50" borderColor="border-yellow-200" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">Lịch sử đo</h2>
+              <p className="text-xs text-gray-500">
+                Giám sát biến động dữ liệu ({filteredData.length} bản ghi)
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-800">Lịch sử đo</h2>
-            <p className="text-xs text-gray-500">Giám sát biến động dữ liệu ({filteredData.length} bản ghi)</p>
-          </div>
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={filteredData.length === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold transition-colors disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            <span>Xuất CSV (Excel)</span>
+          </button>
+        </div>
+      )}
+
+      {!hideCard && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-4 px-4">
+          {RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => {
+                setSelectedRange(opt.key);
+                setExportNote(null);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+                selectedRange === opt.key
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                  : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       )}
 
@@ -189,6 +269,12 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
           </select>
         </div>
       </div>
+
+      {exportNote && !hideCard && (
+        <div className="mx-4 mb-4 px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-100 text-xs font-semibold text-emerald-700">
+          {exportNote}
+        </div>
+      )}
 
       <div className="w-full pl-2 pr-4">{renderChart()}</div>
 
@@ -249,13 +335,14 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
                   <th className="py-2.5 px-2 font-bold">N-P-K</th>
                   <th className="py-2.5 px-2 font-bold">Độ ẩm</th>
                   <th className="py-2.5 px-2 font-bold">Nhiệt đất</th>
+                  {onDeleteRecord && <th className="py-2.5 px-2 font-bold text-right">Xóa</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-gray-700 font-medium">
                 {filteredData
                   .slice()
                   .reverse()
-                  .slice(0, 10)
+                  .slice(0, 15)
                   .map((row, idx) => (
                     <tr key={row.id || idx} className="hover:bg-gray-50/80">
                       <td className="py-2.5 px-2 whitespace-nowrap">{row.timeStr || '--'}</td>
@@ -267,6 +354,20 @@ export const HistoryChart: React.FC<HistoryChartProps> = ({ historyData, hideCar
                       </td>
                       <td className="py-2.5 px-2 whitespace-nowrap">{row.moisture}%</td>
                       <td className="py-2.5 px-2 whitespace-nowrap">{row.soilTemp}°C</td>
+                      {onDeleteRecord && (
+                        <td className="py-2.5 px-2 text-right">
+                          {row.id && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteRecord(row.id!)}
+                              aria-label="Xóa bản ghi này"
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
               </tbody>

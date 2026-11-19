@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { SensorData } from '../types';
+import { SensorData, ChatMessage } from '../types';
 import Markdown from 'react-markdown';
 import { ChibiMarine } from './ChibiMarine';
 import { Send, Loader2 } from 'lucide-react';
@@ -7,6 +7,8 @@ import { requestAIChat } from '../lib/gemini';
 
 interface AIChatProps {
   data: SensorData | null;
+  cropType?: string;
+  location?: string;
 }
 
 const QUICK_PROMPTS = [
@@ -15,8 +17,12 @@ const QUICK_PROMPTS = [
   'Đánh giá cân bằng N-P-K hiện tại',
 ];
 
-export const AIChat: React.FC<AIChatProps> = ({ data }) => {
-  const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
+export const AIChat: React.FC<AIChatProps> = ({
+  data,
+  cropType = 'Vải thiều',
+  location = 'Bắc Giang',
+}) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -31,12 +37,17 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
     const userMsg = rawText.trim();
     if (!userMsg || isTyping) return;
 
+    const previousHistory = messages.slice(-6);
     setMessages((prev) => [...prev, { role: 'user', text: userMsg }]);
     setInput('');
     setIsTyping(true);
 
     try {
-      const aiResponseText = await requestAIChat(userMsg, data);
+      const aiResponseText = await requestAIChat(userMsg, data, {
+        history: previousHistory,
+        cropType,
+        location,
+      });
       setMessages((prev) => [...prev, { role: 'ai', text: aiResponseText }]);
     } catch (err: any) {
       console.error(err);
@@ -65,7 +76,9 @@ export const AIChat: React.FC<AIChatProps> = ({ data }) => {
           </div>
           <div>
             <h2 className="font-bold">M.S.AI</h2>
-            <p className="text-xs text-emerald-100">Trợ lý Nông nghiệp Thông minh</p>
+            <p className="text-xs text-emerald-100">
+              Trợ lý Nông nghiệp • {cropType} ({location})
+            </p>
           </div>
         </div>
         <button

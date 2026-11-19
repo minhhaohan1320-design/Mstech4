@@ -4,14 +4,12 @@
 // ==============================================================
 
 export interface SensorData {
-  // Trường dữ liệu chuẩn gửi từ esp32_mstech_station.ino
+  // Trường dữ liệu chuẩn gửi từ esp32_mstech_station.ino (5 chỉ số đất chuẩn)
   n: number;
   p: number;
   k: number;
   moisture: number;
   soilTemp: number;
-  waterTemp?: number;
-  ph?: number;
   timestamp: number;
 
   // Trường tương thích ngược cho các thành phần giao diện dùng mảng
@@ -33,9 +31,19 @@ export interface ZoneProfile {
   coords: string;
 }
 
+export interface CalibrationConfig {
+  offsetMoist: number; // Bù trừ độ ẩm đất (%), [-30, +30]
+  offsetTemp: number;  // Bù trừ nhiệt độ đất (°C), [-15, +15]
+  scaleN: number;      // Hệ số nhân Đạm (N), [0.5, 2.0]
+  scaleP: number;      // Hệ số nhân Lân (P), [0.5, 2.0]
+  scaleK: number;      // Hệ số nhân Kali (K), [0.5, 2.0]
+}
+
 export interface StationCommand {
   read_soil: boolean;
   update_wifi: boolean;
+  update_calib?: boolean;
+  reboot?: boolean;
   wifi_ssid?: string;
   wifi_pass?: string;
 }
@@ -46,12 +54,23 @@ export interface StationStatus {
   rssi?: number;
   wifiRSSI?: number;
   firmwareVersion?: string;
+  sdOk?: boolean;
+  lastError?: string;
+  uptimeSec?: number;
+  freeHeap?: number;
+  pendingSyncCount?: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'ai';
+  text: string;
 }
 
 export interface Station {
   Data?: SensorData;
   Command?: StationCommand;
   Status?: StationStatus;
+  Calibration?: CalibrationConfig;
 }
 
 export interface HistoryRecord extends SensorData {

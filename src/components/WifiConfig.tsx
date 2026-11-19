@@ -22,7 +22,14 @@ export const WifiConfig: React.FC<WifiConfigProps> = ({ deviceId, onUpdateWifi }
     setIsUpdating(true);
     setStatusMessage(null);
     try {
-      await onUpdateWifi(ssid.trim(), pass);
+      const ok = await onUpdateWifi(ssid.trim(), pass);
+      if (ok === false) {
+        setStatusMessage({
+          type: 'error',
+          text: 'Không thể ghi cấu hình Wi-Fi lên Firebase. Vui lòng kiểm tra kết nối mạng hoặc quyền truy cập.',
+        });
+        return;
+      }
       setStatusMessage({
         type: 'success',
         text: `Đã gửi cấu hình Wi-Fi "${ssid.trim()}" tới trạm ${deviceId}. Đang chờ trạm khởi động lại...`,

@@ -3,7 +3,7 @@
 Dự án Hệ thống giám sát và phân tích nông nghiệp thông minh, giao tiếp với thiết bị ESP32-S3 thông qua Firebase Realtime Database.
 
 ## 1. Project là gì
-Đây là một Web App quản lý trạm quan trắc nông nghiệp IoT, hỗ trợ thu thập các thông số như Đạm (N), Lân (P), Kali (K), Độ ẩm đất, Nhiệt độ đất, Nhiệt độ nước, và pH.
+Đây là một Web App quản lý trạm quan trắc nông nghiệp IoT, chuyên thu thập 5 thông số đất chuẩn gồm: Đạm (N), Lân (P), Kali (K), Độ ẩm đất, và Nhiệt độ đất.
 Web App tích hợp M.S.AI (Google Gemini) để phân tích dữ liệu và cung cấp trợ lý ảo thông minh.
 
 ## 2. Architecture
@@ -11,7 +11,7 @@ Hệ thống tuân theo luồng giao tiếp một chiều thông qua Firebase:
 - **Web App**: React, TypeScript, TailwindCSS (Mobile-first).
 - **Backend/AI**: Express Server xử lý API phân tích (ẩn API Key Gemini).
 - **Firebase**: Realtime Database đóng vai trò là cầu nối (Source of Truth).
-- **Phần cứng**: ESP32-S3 giao tiếp với các cảm biến qua Modbus RTU/RS485.
+- **Phần cứng**: ESP32-S3 giao tiếp với các cảm biến đất qua Modbus RTU/RS485.
 
 Luồng đo cảm biến:
 `USER -> Web -> Firebase -> ESP32-S3 -> Cảm biến -> ESP32-S3 -> Firebase -> Web -> M.S.AI`
@@ -26,16 +26,29 @@ Luồng đo cảm biến:
       - k (number)
       - moisture (number)
       - soilTemp (number)
-      - waterTemp (number)
-      - ph (number)
       - timestamp (number)
     /Command
       - read_soil (boolean)
       - update_wifi (boolean)
+      - update_calib (boolean)
+      - reboot (boolean)
       - wifi_ssid (string)
       - wifi_pass (string)
+    /Calibration
+      - offsetMoist (number)
+      - offsetTemp (number)
+      - scaleN (number)
+      - scaleP (number)
+      - scaleK (number)
     /Status
       - online (boolean)
+      - rssi (number)
+      - firmwareVersion (string)
+      - sdOk (boolean)
+      - lastError (string)
+      - uptimeSec (number)
+      - freeHeap (number)
+      - pendingSyncCount (number)
       - lastSeen (number)
     /History
       /{recordId} ...
@@ -55,54 +68,38 @@ Firebase Rules là thành phần bắt buộc để bảo vệ database trong pr
 }
 ```
 
-## 5. Bảng Firmware Compatibility
-| Tính năng | Firmware | Firebase | Web | Ghi chú |
+## 5. Bảng Firmware & Web Compatibility (v2.2)
+| Tính năng | Firmware (v2.2) | Firebase | Web | Ghi chú |
 | :--- | :--- | :--- | :--- | :--- |
-| Đọc NPK | Có | Có | Có | Realtime |
-| Đọc độ ẩm | Có | Có | Có | |
-| Đọc nhiệt độ đất | Có | Có | Có | |
-| Đọc nhiệt độ nước | Có | Có | Có | |
-| Đọc pH | Có | Có | Có | |
-| Đo 3 lần | Có | Data trung bình | Có | |
-| Đổi Wi-Fi | Có | Có | Có | Restart ESP32 |
-| AP Mode | Có | Không | Hướng dẫn | Chưa có HTTP Server |
-| History Firebase | Chưa đầy đủ | Chưa xác định | Chuẩn bị architecture | |
-| Heartbeat | Chưa có | Chưa có | Chuẩn bị architecture | |
-| OTA | Chưa có | Chưa có | Chưa triển khai | |
+| Đọc NPK + Ẩm/Nhiệt đất | Có | Có | Có | Nhớ thanh ghi NPK, xả nhiễu RS485, lọc Trung vị 3 mẫu |
+| Tự động đo 30 phút & Lưu `/History` | Có | Có | Có | Đẩy thẳng `/History` + hàng đợi bù `/pending_sync.csv` |
+| Đồng bộ giờ thực NTP (GMT+7) | Có | Server timestamp | Có | Ghi `YYYY-MM-DD HH:MM:SS` vào `/log_data.csv` |
+| Heartbeat 45s + Chẩn đoán phần cứng | Có | Có | Có | Hiện RSSI, thẻ SD, lỗi cảm biến, Uptime, Free Heap |
+| Khởi động lại từ xa (`reboot`) | Có | Có | Có | Bấm Reboot 2 bước xác nhận trong tab Cấu hình |
+| Hiệu chuẩn từ xa (Calibration) | Có | Có | Có | Lưu Flash NVS `calib_cfg`, đồng bộ `/Calibration` |
+| Hardware Watchdog Timer (30s) | Có | Không | Không | Tự reboot khi treo 4G/SSL (tương thích Core v2 & v3) |
+| Đèn LED RGB chẩn đoán (GPIO 48) | Có | Không | Không | Xanh lá thở / Vàng đo / Xanh dương Wi-Fi / Tím AP / Đỏ lỗi |
+| Lịch sử `limitToLast(200)` & Xuất CSV | Có | Có | Có | Lọc 24h / 7 ngày / 30 ngày / Tất cả, xuất Excel CSV, xóa bản ghi |
+| Báo cáo PDF 12 tháng & M.S.AI nhớ ngữ cảnh | Không | Có | Có | Gom trung bình theo tháng, M.S.AI nhớ 6 lượt chat & giống cây |
+| PWA cài đặt lên điện thoại | Không | Không | Có | `vite-plugin-pwa`, icon PNG chuẩn Android/iOS, hỗ trợ offline |
+| OTA | Chưa có | Chưa có | Chưa triển khai | Dự kiến cho v2.3 |
 
-## 6. Firmware Issues
-Nếu có vấn đề kết nối hoặc dữ liệu, có thể do firmware:
-- **command race condition**: Cần timeout bảo vệ.
-- **Firebase reconnect**: Lỗi wifi hoặc chập chờn.
-- **timestamp**: Không đồng bộ chính xác.
-- **measurement state**: Không có tiến trình chi tiết 1/3, 2/3.
-- **Wi-Fi restart**: Mất thời gian lâu.
-- **history**: Chưa đồng bộ đầy đủ lên firebase.
+## 6. Mã màu LED RGB chẩn đoán trên trạm ESP32-S3 (GPIO 48)
+- **Xanh lá thở mượt**: Online, kết nối Firebase sẵn sàng.
+- **Vàng nháy nhanh (150ms)**: Đang chạy chu kỳ đọc cảm biến RS485 (3 mẫu lọc trung vị).
+- **Xanh dương nháy (400ms)**: Đang kết nối hoặc mất kết nối Wi-Fi/4G.
+- **Tím nháy (500ms)**: Đang phát AP Mode cấu hình tại `http://192.168.4.1`.
+- **Đỏ nháy nhanh (10s)**: Cảnh báo lỗi đọc cảm biến RS485, lỗi thẻ SD hoặc lỗi đẩy Firebase.
 
-## 7. Firmware Nâng Cấp Đề Xuất (Roadmap)
-FUTURE FEATURE:
-1. Heartbeat
-2. Device status
-3. Wi-Fi RSSI
-4. Firmware version
-5. Measurement progress
-6. Error code
-7. Sensor diagnostics
-8. Firebase History
-9. SD synchronization
-10. OTA update
-11. Direct AP Web Server
-12. Calibration
-13. Restart command
-14. Factory reset
-
-## 8. Command Table
+## 7. Command Table
 | Web Action | Firebase Path | Value | ESP32 |
 | :--- | :--- | :--- | :--- |
-| Đo ngay | `/Command/read_soil` | `true` | Đo 3 lần |
+| Đo ngay | `/Command/read_soil` | `true` | Đo 3 lần Median -> SD -> Firebase |
 | Wi-Fi SSID | `/Command/wifi_ssid` | `string` | SSID mới |
 | Wi-Fi Password | `/Command/wifi_pass` | `string` | Password mới |
-| Đổi Wi-Fi | `/Command/update_wifi` | `true` | Lưu + restart |
+| Đổi Wi-Fi | `/Command/update_wifi` | `true` | Lưu Flash + restart |
+| Hiệu chuẩn cảm biến | `/Command/update_calib` | `true` | Tải `/Calibration` + lưu Flash NVS |
+| Khởi động lại trạm | `/Command/reboot` | `true` | Tự reset `false` + khởi động lại sau 1.5s |
 
 ## 9. Cách Chạy (Development)
 1. Copy file `.env.example` thành `.env` và điền `GEMINI_API_KEY`.

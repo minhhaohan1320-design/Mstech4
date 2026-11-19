@@ -218,10 +218,20 @@ Phân tích tình trạng đất hiện tại và đưa ra lời khuyên.`;
     }
   });
 
-  // API Route for AI Chat
+  // API Route for AI Chat (Hỗ trợ nhớ ngữ cảnh 6 lượt gần nhất & giống cây đang canh tác)
   app.post("/api/chat", async (req, res) => {
     try {
-      const { userMessage, sensorData } = req.body;
+      const { userMessage, sensorData, history, cropType, location } = req.body;
+      const safeCrop = typeof cropType === "string" && cropType.trim() ? cropType.trim() : "Vải thiều";
+      const safeLoc = typeof location === "string" && location.trim() ? location.trim() : "Bắc Giang";
+
+      const recentTurns = Array.isArray(history)
+        ? history
+            .slice(-6)
+            .filter((m: any) => m && typeof m.text === "string" && m.text.trim())
+            .map((m: any) => `${m.role === "user" ? "Nông dân" : "M.S.AI"}: ${m.text.trim()}`)
+            .join("\n")
+        : "";
 
       try {
         const n = sensorData?.n;
@@ -232,22 +242,26 @@ Phân tích tình trạng đất hiện tại và đưa ra lời khuyên.`;
 
         const dataContext = sensorData
           ? `
-Dữ liệu cảm biến đất hiện tại:
+Thông tin canh tác & cảm biến đất hiện tại:
+- Cây trồng: ${safeCrop} | Khu vực: ${safeLoc}
 - N: ${n ?? "Chưa có"} mg/kg
 - P: ${p ?? "Chưa có"} mg/kg
 - K: ${k ?? "Chưa có"} mg/kg
 - Độ ẩm đất: ${moisture ?? "Chưa có"} %
 - Nhiệt độ đất: ${soilTemp ?? "Chưa có"} °C
 `
-          : "Hiện tại chưa có dữ liệu cảm biến đất.";
+          : `Thông tin canh tác: Cây ${safeCrop} tại ${safeLoc}. Hiện tại chưa có dữ liệu cảm biến đất.`;
 
-        const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh. 
-Người dùng hỏi: "${userMessage}". 
+        const historyBlock = recentTurns
+          ? `\nLịch sử hội thoại gần nhất:\n${recentTurns}\n`
+          : "";
 
-${dataContext}
+        const prompt = `Bạn là M.S.AI, trợ lý nông nghiệp ảo thông minh của hệ thống Trạm Quan Trắc M.S.Tech.
+${dataContext}${historyBlock}
+Câu hỏi mới nhất của người dùng: "${userMessage}".
 
-Tuyệt đối không tự bịa dữ liệu. Nếu thông số nào chưa có, hãy nói rõ là chưa có.
-Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.`;
+Tuyệt đối không tự bịa số liệu cảm biến. Nếu thông số nào chưa có, hãy nói rõ là chưa có.
+Trả lời ngắn gọn, bám sát bối cảnh cuộc trò chuyện trước đó (nếu có), thực tế và dễ hiểu bằng tiếng Việt.`;
 
         const response = await generateWithFallback({
           contents: prompt,
@@ -257,11 +271,17 @@ Hãy trả lời ngắn gọn, thân thiện, dễ hiểu bằng tiếng Việt.
           return res.json({ result: response.text });
         }
       } catch (aiErr: any) {
-        const reply = generateChatReply(userMessage, sensorData);
+        const reply = generateChatReply(userMessage, sensorData, {
+          cropType: safeCrop,
+          location: safeLoc,
+        });
         return res.json({ result: reply });
       }
 
-      const reply = generateChatReply(userMessage, sensorData);
+      const reply = generateChatReply(userMessage, sensorData, {
+        cropType: safeCrop,
+        location: safeLoc,
+      });
       return res.json({ result: reply });
     } catch (error: any) {
       console.error("AI Chat Error:", error);

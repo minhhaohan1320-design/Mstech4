@@ -6,6 +6,10 @@ import { HistoryChart } from './components/HistoryChart';
 import { AIAnalysis } from './components/AIAnalysis';
 import { AIChat } from './components/AIChat';
 import { WifiConfig } from './components/WifiConfig';
+import { CalibrationConfig } from './components/CalibrationConfig';
+import { StationHealthCard } from './components/StationHealthCard';
+import { OfflineBanner } from './components/OfflineBanner';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { QRCodeDisplay } from './components/QRCodeDisplay';
 import { QRScanner, decodeQrFromImageFile } from './components/QRScanner';
 import { useStation } from './hooks/useStation';
@@ -22,6 +26,10 @@ export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [stationInput, setStationInput] = useState('');
   const [qrUploadError, setQrUploadError] = useState<string | null>(null);
+  const [zoneContext, setZoneContext] = useState<{ cropName: string; location: string }>({
+    cropName: 'Vải thiều',
+    location: 'Bắc Giang',
+  });
   const qrFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -111,12 +119,19 @@ export default function App() {
   const {
     sensorData,
     commandState,
+    status,
+    calibration,
+    error,
+    clearError,
     isOnline,
     lastUpdated,
     historyData,
     sendMeasureCommand,
     saveToHistory,
+    deleteHistoryRecord,
     updateWifi,
+    updateCalibration,
+    rebootStation,
   } = useStation(deviceId, isDemo);
 
   if (!deviceId && !isDemo) {
@@ -249,6 +264,8 @@ export default function App() {
         setActiveTab={setActiveTab}
         deviceId={currentStationId}
         isOnline={isOnline}
+        rssi={status?.rssi}
+        firmwareVersion={status?.firmwareVersion}
         className="hidden md:flex"
       />
 
@@ -263,23 +280,30 @@ export default function App() {
               {currentStationId}
             </span>
           </div>
-          {(deviceId || isDemo) && (
-            <button
-              type="button"
-              onClick={handleSwitchStation}
-              className="text-[11px] font-bold text-gray-600 bg-gray-100 px-3 py-2 rounded-xl hover:bg-gray-200 tracking-wider transition-colors"
-            >
-              ĐỔI TRẠM
-            </button>
-          )}
+          <div className="flex items-center space-x-2">
+            <PWAInstallButton />
+            {(deviceId || isDemo) && (
+              <button
+                type="button"
+                onClick={handleSwitchStation}
+                className="text-[11px] font-bold text-gray-600 bg-gray-100 px-3 py-2 rounded-xl hover:bg-gray-200 tracking-wider transition-colors"
+              >
+                ĐỔI TRẠM
+              </button>
+            )}
+          </div>
         </header>
 
         <main className="flex-1 p-3 md:p-6 max-w-4xl mx-auto w-full">
+          <OfflineBanner firebaseError={error} onDismissError={clearError} />
+
           {activeTab === 'home' && (
             <Dashboard
               deviceId={currentStationId}
               data={sensorData}
               isOnline={isOnline}
+              rssi={status?.rssi}
+              firmwareVersion={status?.firmwareVersion}
               lastUpdated={lastUpdated}
               isDemo={isDemo}
               commandState={commandState}
@@ -287,25 +311,48 @@ export default function App() {
               onSaveHistory={saveToHistory}
               onNavigateToAI={() => setActiveTab('ai')}
               historyData={historyData}
+              onZoneContextChange={setZoneContext}
             />
           )}
 
           {activeTab === 'history' && (
             <div className="mt-4">
-              <HistoryChart historyData={historyData} />
+              <HistoryChart
+                historyData={historyData}
+                deviceId={currentStationId}
+                onDeleteRecord={deleteHistoryRecord}
+              />
             </div>
           )}
 
           {activeTab === 'ai' && (
             <div className="space-y-6 mt-4">
-              <AIAnalysis data={sensorData} />
-              <AIChat data={sensorData} />
+              <AIAnalysis
+                data={sensorData}
+                defaultCrop={zoneContext.cropName}
+                defaultLocation={zoneContext.location}
+              />
+              <AIChat
+                data={sensorData}
+                cropType={zoneContext.cropName}
+                location={zoneContext.location}
+              />
             </div>
           )}
 
           {activeTab === 'settings' && (
-            <div className="max-w-md mx-auto space-y-6 mt-4">
+            <div className="max-w-md mx-auto space-y-6 mt-4 pb-8">
               <WifiConfig deviceId={currentStationId} onUpdateWifi={updateWifi} />
+              <CalibrationConfig
+                deviceId={currentStationId}
+                calibration={calibration}
+                onUpdateCalibration={updateCalibration}
+              />
+              <StationHealthCard
+                deviceId={currentStationId}
+                status={status}
+                onReboot={rebootStation}
+              />
             </div>
           )}
 

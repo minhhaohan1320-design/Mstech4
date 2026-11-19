@@ -1,4 +1,4 @@
-import { AIInsight, SensorData } from "../types";
+import { AIInsight, SensorData, ChatMessage } from "../types";
 import {
   evaluateAgriculturalInsight,
   generateChatReply,
@@ -49,11 +49,16 @@ export async function requestAIAnalysis(params: {
 }
 
 /**
- * Gọi API trò chuyện M.S.AI phía máy chủ (/api/chat)
+ * Gọi API trò chuyện M.S.AI phía máy chủ (/api/chat) kèm ngữ cảnh hội thoại & giống cây
  */
 export async function requestAIChat(
   userMessage: string,
-  sensorData: SensorData | null
+  sensorData: SensorData | null,
+  options?: {
+    history?: ChatMessage[];
+    cropType?: string;
+    location?: string;
+  }
 ): Promise<string> {
   try {
     const response = await fetch("/api/chat", {
@@ -62,6 +67,9 @@ export async function requestAIChat(
       body: JSON.stringify({
         userMessage,
         sensorData,
+        history: options?.history?.slice(-6) || [],
+        cropType: options?.cropType,
+        location: options?.location,
       }),
     });
 
@@ -75,7 +83,10 @@ export async function requestAIChat(
     console.warn("Lỗi kết nối /api/chat, sử dụng phản hồi nội bộ:", err);
   }
 
-  return generateChatReply(userMessage, sensorData);
+  return generateChatReply(userMessage, sensorData, {
+    cropType: options?.cropType,
+    location: options?.location,
+  });
 }
 
 /**

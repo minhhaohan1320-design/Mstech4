@@ -1,14 +1,27 @@
 // ==============================================================
 // TỆP 4: src/hooks/useStation.ts
-// Đồng bộ hóa lệnh đọc cảm biến, đổi Wi-Fi, kiểm tra trạng thái Online và lưu lịch sử
+// Đồng bộ hóa lệnh đọc cảm biến, đổi Wi-Fi, hiệu chuẩn cảm biến, Heartbeat Online/RSSI và lịch sử
 // ==============================================================
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ref, onValue, update, push, set } from 'firebase/database';
+import { ref, onValue, update, push, set, query, limitToLast, remove } from 'firebase/database';
 import { db } from '../lib/firebase';
-import { SensorData, StationStatus, HistoryRecord, StationCommand } from '../types';
-import { parseStationId, normalizeSensorData } from '../utils/stationLogic';
+import {
+  SensorData,
+  StationStatus,
+  HistoryRecord,
+  StationCommand,
+  CalibrationConfig,
+} from '../types';
+import {
+  parseStationId,
+  normalizeSensorData,
+  isStationOnline,
+  DEFAULT_CALIBRATION,
+  sanitizeCalibration,
+  applyCalibrationToSensorData,
+} from '../utils/stationLogic';
 
-const DEMO_DATA: SensorData = {
+const DEMO_RAW_DATA: SensorData = {
   n: 15,
   p: 20,
   k: 35,
@@ -30,6 +43,7 @@ function formatDateAndTime(ts: number): { dateStr: string; timeStr: string } {
 function createDemoHistory(): HistoryRecord[] {
   const now = Date.now();
   const samples = [
+    { offsetMin: -4320, n: 18, p: 17, k: 31, moisture: 38.4, soilTemp: 26.2 },
     { offsetMin: -180, n: 14, p: 18, k: 32, moisture: 40.2, soilTemp: 26.5 },
     { offsetMin: -120, n: 15, p: 19, k: 34, moisture: 41.8, soilTemp: 27.1 },
     { offsetMin: -60, n: 16, p: 21, k: 36, moisture: 43.0, soilTemp: 27.5 },
@@ -53,6 +67,7 @@ function createDemoHistory(): HistoryRecord[] {
 export function useStation(deviceId: string | null, isDemo: boolean = false) {
   const [sensorData, setSensorData] = useState<SensorData | null>(null);
   const [status, setStatus] = useState<StationStatus>({ online: false, lastSeen: 0 });
+  const [calibration, setCalibration] = useState<CalibrationConfig>(DEFAULT_CALIBRATION);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isCommanding, setIsCommanding] = useState<boolean>(false);
@@ -61,11 +76,29 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
   const commandTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const graceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasExplicitStatusRef = useRef<boolean>(false);
+  const calibrationRef = useRef<CalibrationConfig>(DEFAULT_CALIBRATION);
+  const rawDemoRef = useRef<SensorData>(DEMO_RAW_DATA);
+
+  useEffect(() => {
+    calibrationRef.current = calibration;
+  }, [calibration]);
 
   useEffect(() => {
     if (isDemo) {
-      setSensorData(DEMO_DATA);
-      setStatus({ online: true, lastSeen: Date.now() });
+      const now = Date.now();
+      rawDemoRef.current = { ...DEMO_RAW_DATA, timestamp: now };
+      setSensorData(applyCalibrationToSensorData(rawDemoRef.current, calibrationRef.current));
+      setStatus({
+        online: true,
+        lastSeen: now,
+        rssi: -58,
+        firmwareVersion: 'v2.2',
+        sdOk: true,
+        lastError: 'NONE',
+        uptimeSec: 18420,
+        freeHeap: 218400,
+        pendingSyncCount: 0,
+      });
       setIsConnected(true);
       setHistory(createDemoHistory());
       setError(null);
@@ -77,6 +110,7 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       setSensorData(null);
       setIsConnected(false);
       setStatus({ online: false, lastSeen: 0 });
+      setCalibration(DEFAULT_CALIBRATION);
       return;
     }
 
@@ -85,7 +119,9 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
     const dataRef = ref(db, `/Stations/${cleanId}/Data`);
     const cmdRef = ref(db, `/Stations/${cleanId}/Command`);
     const statusRef = ref(db, `/Stations/${cleanId}/Status`);
-    const historyRef = ref(db, `/Stations/${cleanId}/History`);
+    const calibRef = ref(db, `/Stations/${cleanId}/Calibration`);
+    // Giới hạn tối đa 200 bản ghi gần nhất để chống lag & tiết kiệm băng thông Firebase RTDB
+    const historyQuery = query(ref(db, `/Stations/${cleanId}/History`), limitToLast(200));
 
     // 1. Lắng nghe dữ liệu cảm biến từ ESP32-S3 (/Stations/<ID>/Data)
     const unsubData = onValue(
@@ -99,7 +135,6 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           setSensorData(normalized);
           setError(null);
 
-          // Khi nhận được gói Data mới từ ESP32, kết thúc trạng thái chờ đo
           if (graceTimeoutRef.current) {
             clearTimeout(graceTimeoutRef.current);
             graceTimeoutRef.current = null;
@@ -110,12 +145,12 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           }
           setIsCommanding(false);
 
-          // Firmware esp32_mstech_station.ino đẩy trực tiếp vào /Data (không có node /Status riêng)
           if (!hasExplicitStatusRef.current) {
+            const seenTs = normalized.timestamp || now;
             setStatus((prev) => ({
               ...prev,
-              online: true,
-              lastSeen: normalized.timestamp || now,
+              online: isStationOnline(seenTs, now),
+              lastSeen: seenTs,
             }));
           }
         }
@@ -123,7 +158,7 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       (err) => {
         console.error('Lỗi đọc Firebase Data:', err);
         setIsConnected(false);
-        setError(err.message);
+        setError(`Không thể kết nối dữ liệu trạm ${cleanId}: ${err.message}`);
       }
     );
 
@@ -136,8 +171,6 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
         if (isReading) {
           setIsCommanding(true);
         } else {
-          // ESP32 hạ cờ read_soil=false ngay khi bắt đầu chu kỳ đọc 3 lần (~1.5 giây)
-          // Giữ trạng thái đang đo thêm tối đa 1.8 giây hoặc cho tới khi /Data mới đổ về
           if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
           graceTimeoutRef.current = setTimeout(() => {
             setIsCommanding(false);
@@ -152,23 +185,46 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       }
     });
 
-    // 3. Lắng nghe trạng thái Online / Heartbeat (nếu có node /Status)
+    // 3. Lắng nghe trạng thái Online / Heartbeat / RSSI / Chẩn đoán phần cứng (/Stations/<ID>/Status)
     const unsubStatus = onValue(statusRef, (snapshot) => {
       if (snapshot.exists()) {
         hasExplicitStatusRef.current = true;
         const st = snapshot.val();
-        const lastSeen = typeof st.lastSeen === 'number' ? st.lastSeen : Date.now();
-        const isRecent = Date.now() - lastSeen < 120000;
+        const now = Date.now();
+        const lastSeen = typeof st.lastSeen === 'number' ? st.lastSeen : 0;
+        const rssiVal =
+          typeof st.rssi === 'number'
+            ? st.rssi
+            : typeof st.wifiRSSI === 'number'
+            ? st.wifiRSSI
+            : undefined;
         setStatus({
-          online: Boolean(st.online) && isRecent,
+          online: Boolean(st.online) && isStationOnline(lastSeen, now),
           lastSeen,
-          rssi: st.rssi,
+          rssi: rssiVal,
+          firmwareVersion:
+            typeof st.firmwareVersion === 'string' ? st.firmwareVersion : undefined,
+          sdOk: typeof st.sdOk === 'boolean' ? st.sdOk : undefined,
+          lastError: typeof st.lastError === 'string' ? st.lastError : undefined,
+          uptimeSec: typeof st.uptimeSec === 'number' ? st.uptimeSec : undefined,
+          freeHeap: typeof st.freeHeap === 'number' ? st.freeHeap : undefined,
+          pendingSyncCount:
+            typeof st.pendingSyncCount === 'number' ? st.pendingSyncCount : undefined,
         });
       }
     });
 
-    // 4. Lắng nghe lịch sử đo (/Stations/<ID>/History)
-    const unsubHistory = onValue(historyRef, (snapshot) => {
+    // 4. Lắng nghe thông số hiệu chuẩn cảm biến (/Stations/<ID>/Calibration)
+    const unsubCalib = onValue(calibRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setCalibration(sanitizeCalibration(snapshot.val()));
+      } else {
+        setCalibration(DEFAULT_CALIBRATION);
+      }
+    });
+
+    // 5. Lắng nghe lịch sử đo gần nhất (/Stations/<ID>/History - tối đa 200 bản ghi)
+    const unsubHistory = onValue(historyQuery, (snapshot) => {
       if (snapshot.exists()) {
         const rawHist = snapshot.val();
         const list: HistoryRecord[] = Object.keys(rawHist).map((key) => {
@@ -191,11 +247,23 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       }
     });
 
+    // 6. Bộ kiểm tra định kỳ mỗi 15 giây để tự động chuyển sang OFFLINE nếu ESP32 mất kết nối > 2 phút
+    const onlineWatchInterval = setInterval(() => {
+      setStatus((prev) => {
+        if (!prev.lastSeen) return prev;
+        const fresh = isStationOnline(prev.lastSeen, Date.now());
+        if (prev.online === fresh) return prev;
+        return { ...prev, online: fresh };
+      });
+    }, 15000);
+
     return () => {
       unsubData();
       unsubCmd();
       unsubStatus();
+      unsubCalib();
       unsubHistory();
+      clearInterval(onlineWatchInterval);
       if (commandTimeoutRef.current) clearTimeout(commandTimeoutRef.current);
       if (graceTimeoutRef.current) clearTimeout(graceTimeoutRef.current);
     };
@@ -207,7 +275,7 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
       setIsCommanding(true);
       setTimeout(() => {
         const now = Date.now();
-        const updated: SensorData = normalizeSensorData(
+        const rawSample: SensorData = normalizeSensorData(
           {
             n: Math.round(14 + Math.random() * 6),
             p: Math.round(18 + Math.random() * 6),
@@ -218,7 +286,15 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           },
           now
         );
+        rawDemoRef.current = rawSample;
+        const updated = applyCalibrationToSensorData(rawSample, calibrationRef.current);
         setSensorData(updated);
+        setStatus((prev) => ({
+          ...prev,
+          online: true,
+          lastSeen: now,
+          rssi: Math.round(-54 - Math.random() * 10),
+        }));
         const { dateStr, timeStr } = formatDateAndTime(now);
         setHistory((prev) => [
           ...prev,
@@ -252,7 +328,7 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
     } catch (err: any) {
       console.error('Lỗi gửi lệnh đo:', err);
       setIsCommanding(false);
-      setError(err.message);
+      setError(`Không thể gửi lệnh đo: ${err.message}`);
     }
   }, [deviceId, isDemo]);
 
@@ -271,15 +347,68 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           wifi_pass: pass,
           update_wifi: true,
         });
+        setError(null);
         return true;
       } catch (err: any) {
         console.error('Lỗi cập nhật Wi-Fi:', err);
-        setError(err.message);
+        setError(`Không thể gửi cấu hình Wi-Fi: ${err.message}`);
         return false;
       }
     },
     [deviceId, isDemo]
   );
+
+  // Gửi hệ số bù trừ hiệu chuẩn cảm biến xuống ESP32-S3 (/Calibration + /Command/update_calib)
+  const updateCalibration = useCallback(
+    async (nextConfig: CalibrationConfig) => {
+      const cleanCalib = sanitizeCalibration(nextConfig);
+      if (isDemo) {
+        setCalibration(cleanCalib);
+        setSensorData(applyCalibrationToSensorData(rawDemoRef.current, cleanCalib));
+        return true;
+      }
+      const cleanId = deviceId ? parseStationId(deviceId) : '';
+      if (!cleanId) return false;
+      try {
+        const calibRef = ref(db, `/Stations/${cleanId}/Calibration`);
+        const cmdRef = ref(db, `/Stations/${cleanId}/Command`);
+        await set(calibRef, cleanCalib);
+        await update(cmdRef, { update_calib: true });
+        setCalibration(cleanCalib);
+        setError(null);
+        return true;
+      } catch (err: any) {
+        console.error('Lỗi cập nhật hiệu chuẩn cảm biến:', err);
+        setError(`Không thể lưu hiệu chuẩn: ${err.message}`);
+        return false;
+      }
+    },
+    [deviceId, isDemo]
+  );
+
+  // Gửi lệnh khởi động lại ESP32-S3 từ xa (/Command/reboot)
+  const rebootStation = useCallback(async () => {
+    if (isDemo) {
+      setStatus((prev) => ({
+        ...prev,
+        uptimeSec: 1,
+        lastSeen: Date.now(),
+      }));
+      return true;
+    }
+    const cleanId = deviceId ? parseStationId(deviceId) : '';
+    if (!cleanId) return false;
+    try {
+      const cmdRef = ref(db, `/Stations/${cleanId}/Command`);
+      await update(cmdRef, { reboot: true });
+      setError(null);
+      return true;
+    } catch (err: any) {
+      console.error('Lỗi gửi lệnh khởi động lại trạm:', err);
+      setError(`Không thể gửi lệnh khởi động lại: ${err.message}`);
+      return false;
+    }
+  }, [deviceId, isDemo]);
 
   // Lưu bản ghi hiện tại vào History
   const saveToHistory = useCallback(
@@ -321,15 +450,41 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
           dateStr,
           timeStr,
         });
+        setError(null);
         return true;
       } catch (err: any) {
         console.error('Lỗi lưu lịch sử:', err);
-        setError(err.message);
+        setError(`Không thể lưu bản ghi lịch sử: ${err.message}`);
         return false;
       }
     },
     [deviceId, sensorData, isDemo]
   );
+
+  // Xóa 1 bản ghi lịch sử bị nhiễu/thử nghiệm
+  const deleteHistoryRecord = useCallback(
+    async (recordId: string) => {
+      if (!recordId) return false;
+      if (isDemo) {
+        setHistory((prev) => prev.filter((item) => item.id !== recordId));
+        return true;
+      }
+      const cleanId = deviceId ? parseStationId(deviceId) : '';
+      if (!cleanId) return false;
+      try {
+        const recordRef = ref(db, `/Stations/${cleanId}/History/${recordId}`);
+        await remove(recordRef);
+        return true;
+      } catch (err: any) {
+        console.error('Lỗi xóa bản ghi lịch sử:', err);
+        setError(`Không thể xóa bản ghi lịch sử: ${err.message}`);
+        return false;
+      }
+    },
+    [deviceId, isDemo]
+  );
+
+  const clearError = useCallback(() => setError(null), []);
 
   // Các trường tương thích ngược với App.tsx và Dashboard.tsx
   const isOnline = status.online;
@@ -346,13 +501,18 @@ export function useStation(deviceId: string | null, isDemo: boolean = false) {
   return {
     sensorData,
     status,
+    calibration,
     history,
     isConnected,
     isCommanding,
     error,
+    clearError,
     triggerRead,
     updateWifi,
+    updateCalibration,
+    rebootStation,
     saveToHistory,
+    deleteHistoryRecord,
 
     // Tương thích ngược:
     isOnline,

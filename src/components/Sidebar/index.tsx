@@ -1,16 +1,29 @@
 import React from 'react';
-import { Home, BarChart2, MessageSquare, Settings, QrCode } from 'lucide-react';
+import { Home, BarChart2, MessageSquare, Settings, QrCode, Wifi } from 'lucide-react';
 import { ChibiMarine } from '../ChibiMarine';
+import { getWifiSignalQuality } from '../../utils/stationLogic';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   deviceId: string | null;
   isOnline: boolean;
+  rssi?: number;
+  firmwareVersion?: string;
   className?: string;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, deviceId, isOnline, className = '' }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  deviceId,
+  isOnline,
+  rssi,
+  firmwareVersion,
+  className = '',
+}) => {
+  const signal = getWifiSignalQuality(rssi);
+
   return (
     <aside className={`w-64 bg-white border-r border-gray-100 flex-col h-screen sticky top-0 ${className}`}>
       <div className="p-6 text-center border-b border-gray-50">
@@ -33,22 +46,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, devic
         <div className="p-4 border-t border-gray-50 bg-gray-50/50">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 shrink-0">
-               <ChibiMarine chapter="ultramarine" bgColor="bg-white" borderColor="border-gray-200" />
+              <ChibiMarine chapter="ultramarine" bgColor="bg-blue-50" borderColor="border-blue-200" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-gray-900 truncate">{deviceId}</p>
-              <div className="flex items-center mt-0.5">
-                <span className="relative flex h-2 w-2 mr-1.5">
-                  {isOnline ? (
-                    <>
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </>
-                  ) : (
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                  )}
-                </span>
-                <span className="text-[10px] font-bold text-gray-500">{isOnline ? 'ONLINE' : 'OFFLINE'}</span>
+              <div className="flex items-center justify-between gap-1">
+                <p className="text-xs font-bold text-gray-900 truncate">{deviceId}</p>
+                {firmwareVersion && (
+                  <span className="text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded">
+                    {firmwareVersion}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between mt-1">
+                <div className="flex items-center">
+                  <span className="relative flex h-2 w-2 mr-1.5">
+                    {isOnline ? (
+                      <>
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </>
+                    ) : (
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    )}
+                  </span>
+                  <span className="text-[10px] font-bold text-gray-500">
+                    {isOnline ? 'ONLINE' : 'OFFLINE'}
+                  </span>
+                </div>
+                {typeof rssi === 'number' && rssi !== 0 && (
+                  <span
+                    className={`flex items-center space-x-1 text-[10px] font-bold ${signal.textClass}`}
+                    title={`Cường độ sóng Wi-Fi: ${rssi} dBm (${signal.label})`}
+                  >
+                    <Wifi className="w-3 h-3" />
+                    <span>{rssi} dBm</span>
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -58,7 +91,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, devic
   );
 };
 
-const NavItem = ({ id, icon, label, activeTab, setActiveTab }: { id: string, icon: React.ReactNode, label: string, activeTab: string, setActiveTab: (t: string) => void }) => {
+const NavItem = ({
+  id,
+  icon,
+  label,
+  activeTab,
+  setActiveTab,
+}: {
+  id: string;
+  icon: React.ReactNode;
+  label: string;
+  activeTab: string;
+  setActiveTab: (t: string) => void;
+}) => {
   const active = activeTab === id;
   return (
     <button
@@ -66,8 +111,8 @@ const NavItem = ({ id, icon, label, activeTab, setActiveTab }: { id: string, ico
       aria-current={active ? 'page' : undefined}
       onClick={() => setActiveTab(id)}
       className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all font-semibold text-sm ${
-        active 
-          ? 'bg-emerald-50 text-emerald-700' 
+        active
+          ? 'bg-emerald-50 text-emerald-700'
           : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
       }`}
     >

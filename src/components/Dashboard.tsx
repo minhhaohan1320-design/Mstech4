@@ -4,7 +4,12 @@ import { ChibiMarine } from './ChibiMarine';
 import { HistoryChart } from './HistoryChart';
 import { AIAnalysis } from './AIAnalysis';
 import { requestPdfAnalysis } from '../lib/gemini';
-import { sanitizePdfText } from '../utils/stationLogic';
+import {
+  sanitizePdfText,
+  getWifiSignalQuality,
+  evaluateMetricLevel,
+  aggregateMonthlyReport,
+} from '../utils/stationLogic';
 import Markdown from 'react-markdown';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -21,12 +26,15 @@ import {
   Save,
   Loader2,
   CheckCircle2,
+  Wifi,
 } from 'lucide-react';
 
 interface DashboardProps {
   deviceId: string;
   data: SensorData | null;
   isOnline: boolean;
+  rssi?: number;
+  firmwareVersion?: string;
   lastUpdated: string | null;
   isDemo: boolean;
   commandState: StationCommand | null;
@@ -34,6 +42,7 @@ interface DashboardProps {
   onSaveHistory?: (zone?: string, cropName?: string) => Promise<boolean>;
   onNavigateToAI: () => void;
   historyData?: HistoryRecord[];
+  onZoneContextChange?: (ctx: { cropName: string; location: string }) => void;
 }
 
 const DEFAULT_ZONE: ZoneProfile = {
@@ -45,14 +54,38 @@ const DEFAULT_ZONE: ZoneProfile = {
   coords: '21.2731° N, 106.1946° E (Bắc Giang)',
 };
 
-const MinimalSensorCard = ({ title, value, unit, icon, labelColor }: any) => {
+const MinimalSensorCard = ({
+  title,
+  value,
+  unit,
+  icon,
+  labelColor,
+  metricKey,
+}: {
+  title: string;
+  value: any;
+  unit: string;
+  icon: React.ReactNode;
+  labelColor: string;
+  metricKey: 'n' | 'p' | 'k' | 'moisture' | 'soilTemp';
+}) => {
   const isInvalid =
     value === null || value === undefined || (typeof value === 'number' && isNaN(value));
   const displayValue = isInvalid ? '--' : value;
+  const level = evaluateMetricLevel(metricKey, isInvalid ? null : Number(value));
 
   return (
     <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm flex flex-col justify-between">
-      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">{title}</div>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{title}</div>
+        {!isInvalid && (
+          <span
+            className={`px-2 py-0.5 rounded-md border text-[10px] font-bold shrink-0 ${level.badgeClass}`}
+          >
+            {level.label}
+          </span>
+        )}
+      </div>
       <div className="flex items-end justify-between">
         <div className="flex items-center space-x-2">
           <span className={`font-bold text-lg ${labelColor}`}>{icon}</span>
@@ -77,13 +110,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   deviceId,
   data,
   isOnline,
+  rssi,
+  firmwareVersion,
   lastUpdated,
   isDemo,
   commandState,
   onMeasure,
   onSaveHistory,
   historyData = [],
+  onZoneContextChange,
 }) => {
+  const signal = getWifiSignalQuality(rssi);
   const [isMeasuring, setIsMeasuring] = useState(false);
   const storageKey = `mstech_zones_${deviceId || 'default'}`;
 
@@ -134,6 +171,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const cropName = currentZone.cropName;
   const variety = currentZone.variety;
   const coords = currentZone.coords;
+
+  useEffect(() => {
+    if (onZoneContextChange) {
+      onZoneContextChange({
+        cropName: cropName || 'Vải thiều',
+        location: location || 'Bắc Giang',
+      });
+    }
+  }, [cropName, location, onZoneContextChange]);
 
   const updateCurrentZone = (patch: Partial<ZoneProfile>) => {
     setZoneProfiles((prev) =>
@@ -224,47 +270,83 @@ export const Dashboard: React.FC<DashboardProps> = ({
         26
       );
 
-      const rows = (historyData.length > 0 ? historyData.slice(-12) : data ? [data] : []).map(
-        (item: any, idx: number) => [
+      const monthly = aggregateMonthlyReport(historyData);
+      const useMonthlySummary = monthly.length >= 2;
+
+      if (useMonthlySummary) {
+        const rows = monthly.map((m, idx) => [
           String(idx + 1),
-          sanitizePdfText(
-            String(
-              item.timeStr ||
-                item.dateStr ||
-                new Date(item.timestamp || Date.now()).toLocaleString('vi-VN')
-            )
-          ),
-          sanitizePdfText(String(item.zone || activeZone)),
-          String(item.n ?? '--'),
-          String(item.p ?? '--'),
-          String(item.k ?? '--'),
-          String(item.moisture ?? '--'),
-          String(item.soilTemp ?? '--'),
-        ]
-      );
-
-      autoTable(doc, {
-        startY: 32,
-        head: [
-          [
-            '#',
-            'Thoi gian',
-            'Khu vuc',
-            'N (mg/kg)',
-            'P (mg/kg)',
-            'K (mg/kg)',
-            'Do am dat (%)',
-            'Nhiet dat (C)',
+          m.monthKey,
+          String(m.count),
+          String(m.n),
+          String(m.p),
+          String(m.k),
+          String(m.moisture),
+          String(m.soilTemp),
+        ]);
+        autoTable(doc, {
+          startY: 32,
+          head: [
+            [
+              '#',
+              'Thang',
+              'So lan do',
+              'TB N (mg/kg)',
+              'TB P (mg/kg)',
+              'TB K (mg/kg)',
+              'TB Am dat (%)',
+              'TB Nhiet (C)',
+            ],
           ],
-        ],
-        body:
-          rows.length > 0
-            ? rows
-            : [['1', 'Chua co du lieu', sanitizePdfText(activeZone), '--', '--', '--', '--', '--']],
-      });
+          body: rows,
+        });
+        doc.save(`BaoCao_12Thang_MSTech_${deviceId}.pdf`);
+        setReportNote(
+          `Đã xuất báo cáo tổng hợp ${monthly.length} tháng (${historyData.length} bản ghi).`
+        );
+      } else {
+        const rows = (historyData.length > 0 ? historyData.slice(-24) : data ? [data] : []).map(
+          (item: any, idx: number) => [
+            String(idx + 1),
+            sanitizePdfText(
+              String(
+                item.timeStr ||
+                  item.dateStr ||
+                  new Date(item.timestamp || Date.now()).toLocaleString('vi-VN')
+              )
+            ),
+            sanitizePdfText(String(item.zone || activeZone)),
+            String(item.n ?? '--'),
+            String(item.p ?? '--'),
+            String(item.k ?? '--'),
+            String(item.moisture ?? '--'),
+            String(item.soilTemp ?? '--'),
+          ]
+        );
 
-      doc.save(`BaoCao_MSTech_${deviceId}.pdf`);
-      setReportNote(`Đã xuất file BaoCao_MSTech_${deviceId}.pdf thành công (${rows.length} bản ghi).`);
+        autoTable(doc, {
+          startY: 32,
+          head: [
+            [
+              '#',
+              'Thoi gian',
+              'Khu vuc',
+              'N (mg/kg)',
+              'P (mg/kg)',
+              'K (mg/kg)',
+              'Do am dat (%)',
+              'Nhiet dat (C)',
+            ],
+          ],
+          body:
+            rows.length > 0
+              ? rows
+              : [['1', 'Chua co du lieu', sanitizePdfText(activeZone), '--', '--', '--', '--', '--']],
+        });
+
+        doc.save(`BaoCao_MSTech_${deviceId}.pdf`);
+        setReportNote(`Đã xuất file BaoCao_MSTech_${deviceId}.pdf thành công (${rows.length} bản ghi).`);
+      }
     } catch (err: any) {
       console.error('Export PDF error:', err);
       setReportNote('Đã tổng hợp dữ liệu báo cáo 12 tháng sẵn sàng.');
@@ -299,8 +381,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
     reader.readAsDataURL(file);
   };
-
-  const recordCount = Math.min(historyData?.length || 0, 12);
 
   return (
     <div className="space-y-6 pb-8">
@@ -410,15 +490,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-6">
-          <MinimalSensorCard title="ĐẠM (N)" value={data?.n} unit="mg/kg" icon="N" labelColor="text-blue-600" />
-          <MinimalSensorCard title="LÂN (P)" value={data?.p} unit="mg/kg" icon="P" labelColor="text-orange-500" />
-          <MinimalSensorCard title="KALI (K)" value={data?.k} unit="mg/kg" icon="K" labelColor="text-purple-600" />
+          <MinimalSensorCard
+            title="ĐẠM (N)"
+            value={data?.n}
+            unit="mg/kg"
+            icon="N"
+            labelColor="text-blue-600"
+            metricKey="n"
+          />
+          <MinimalSensorCard
+            title="LÂN (P)"
+            value={data?.p}
+            unit="mg/kg"
+            icon="P"
+            labelColor="text-orange-500"
+            metricKey="p"
+          />
+          <MinimalSensorCard
+            title="KALI (K)"
+            value={data?.k}
+            unit="mg/kg"
+            icon="K"
+            labelColor="text-purple-600"
+            metricKey="k"
+          />
           <MinimalSensorCard
             title="ĐỘ ẨM ĐẤT"
             value={data?.moisture}
             unit="%"
             icon={<Droplets className="w-5 h-5" />}
             labelColor="text-blue-400"
+            metricKey="moisture"
           />
           <div className="col-span-2">
             <MinimalSensorCard
@@ -427,6 +529,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               unit="°C"
               icon={<Thermometer className="w-5 h-5" />}
               labelColor="text-orange-500"
+              metricKey="soilTemp"
             />
           </div>
         </div>
@@ -455,7 +558,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </button>
         )}
 
-        <div className="flex items-center justify-between text-xs font-bold text-gray-500 mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-gray-500 mb-6 bg-gray-50 p-4 rounded-2xl border border-gray-100">
           <div className="flex items-center space-x-3">
             <div
               className={`w-2.5 h-2.5 rounded-full shrink-0 ${
@@ -470,8 +573,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 : 'Trạm đang offline'}
             </span>
           </div>
+          <div className="flex items-center flex-wrap gap-2">
+            {typeof rssi === 'number' && !Number.isNaN(rssi) && (
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-[11px] font-bold ${signal.textClass}`}
+                title="Cường độ sóng Wi-Fi tại trạm ESP32-S3"
+              >
+                <Wifi className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {rssi} dBm • {signal.label}
+                </span>
+              </span>
+            )}
+            {firmwareVersion && (
+              <span className="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-100 text-[10px] font-bold text-emerald-700">
+                FW {firmwareVersion}
+              </span>
+            )}
+          </div>
           {statusNote && (
-            <span className="text-[11px] font-semibold text-emerald-700 truncate ml-3">{statusNote}</span>
+            <div className="w-full pt-2 mt-1 border-t border-gray-200/70 text-[11px] font-semibold text-emerald-700">
+              {statusNote}
+            </div>
           )}
         </div>
 
@@ -546,10 +669,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </p>
         <div className="flex items-center justify-between bg-gray-50 p-5 rounded-2xl mb-5 border border-gray-100">
           <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-            Số bản ghi hiện có:
+            Bản ghi lịch sử sẵn sàng:
           </span>
           <span className="text-emerald-600 font-bold bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-100">
-            {recordCount}/12
+            {historyData?.length || 0} bản ghi ({Math.min(aggregateMonthlyReport(historyData).length, 12)}/12 tháng)
           </span>
         </div>
         <button
